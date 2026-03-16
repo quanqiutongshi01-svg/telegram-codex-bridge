@@ -2,11 +2,15 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-An installable macOS bridge that keeps a local Codex session reachable through Telegram.
+[![CI](https://github.com/quanqiutongshi01-svg/telegram-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/quanqiutongshi01-svg/telegram-codex-bridge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-E5534B.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-1F6FEB.svg)](pyproject.toml)
+[![Platform](https://img.shields.io/badge/Platform-macOS-111827.svg)](README.md)
+
+An installable macOS bridge that keeps a local Codex session reachable through Telegram.  
 一个可安装的 macOS 桥接器，让本地 Codex 会话可以持续通过 Telegram 访问。
 
-It supports:
-它支持：
+## Highlights
 
 - Telegram text tasks
 - Image and document input
@@ -18,6 +22,33 @@ It supports:
 - `launchd` service management on macOS
 
 This repository is also structured as a Codex skill, so it can be linked into `$CODEX_HOME/skills`.
+
+## Quick Start
+
+1. Create a Telegram bot with `@BotFather`
+2. Install the bridge locally with `scripts/install.py`
+3. Open Telegram and use `/menu` to control Codex
+
+```bash
+python3 scripts/install.py \
+  --bot-token "<telegram-bot-token>" \
+  --allow-user "<your-telegram-user-id>" \
+  --workspace main=/Users/your-name/projects/telegram-codex-bridge
+```
+
+## How It Works
+
+```mermaid
+flowchart LR
+    A["Telegram Chat"] --> B["Telegram Codex Bridge"]
+    B --> C["Local Codex CLI"]
+    B --> D["Local Whisper"]
+    B --> E["launchd Service"]
+    C --> F["Workspace Files"]
+    D --> B
+    F --> B
+    B --> A
+```
 
 ## Visual Direction
 
@@ -36,15 +67,6 @@ Three original icon concepts live in [`docs/assets/`](docs/assets):
 - A Telegram bot token from `@BotFather`
 
 ## Install
-
-Run the installer and provide your bot token, allowed chat ids, and workspace path:
-
-```bash
-python3 scripts/install.py \
-  --bot-token "<telegram-bot-token>" \
-  --allow-user "<your-telegram-user-id>" \
-  --workspace main=/Users/your-name/projects/telegram-codex-bridge
-```
 
 Useful optional flags:
 
@@ -79,6 +101,15 @@ python3 scripts/service_control.py status
 - `/new`: start a fresh Telegram thread
 - `/stop`: stop the current running task
 - `/help`: show command help
+
+## Repository Layout
+
+- `src/telegram_codex_bridge/`: bridge runtime
+- `scripts/`: install, uninstall, doctor, service control
+- `tests/`: pytest suite
+- `references/`: configuration and operator reference
+- `SKILL.md`: Codex skill entry
+- `agents/openai.yaml`: skill UI metadata
 
 ## Codex Skill Use
 

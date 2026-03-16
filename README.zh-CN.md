@@ -2,10 +2,15 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-一个可安装的 macOS Telegram 桥接器，让本地 Codex 会话可以持续通过 Telegram 访问。
+[![CI](https://github.com/quanqiutongshi01-svg/telegram-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/quanqiutongshi01-svg/telegram-codex-bridge/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-E5534B.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-1F6FEB.svg)](pyproject.toml)
+[![Platform](https://img.shields.io/badge/Platform-macOS-111827.svg)](README.zh-CN.md)
+
+一个可安装的 macOS Telegram 桥接器，让本地 Codex 会话可以持续通过 Telegram 访问。  
 An installable macOS bridge that keeps a local Codex session reachable through Telegram.
 
-它支持：
+## 项目亮点
 
 - Telegram 文本任务
 - 图片和文档输入
@@ -17,6 +22,33 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - 基于 macOS `launchd` 的后台常驻管理
 
 这个仓库同时也是一个 Codex skill，可以挂载到 `$CODEX_HOME/skills` 中使用。
+
+## 三步上手
+
+1. 用 `@BotFather` 创建 Telegram 机器人
+2. 运行 `scripts/install.py` 在本机安装桥接器
+3. 打开 Telegram，通过 `/menu` 控制 Codex
+
+```bash
+python3 scripts/install.py \
+  --bot-token "<telegram-bot-token>" \
+  --allow-user "<your-telegram-user-id>" \
+  --workspace main=/Users/your-name/projects/telegram-codex-bridge
+```
+
+## 工作原理
+
+```mermaid
+flowchart LR
+    A["Telegram 聊天"] --> B["Telegram Codex Bridge"]
+    B --> C["本地 Codex CLI"]
+    B --> D["本地 Whisper"]
+    B --> E["launchd 后台服务"]
+    C --> F["工作区文件"]
+    D --> B
+    F --> B
+    B --> A
+```
 
 ## 视觉方案
 
@@ -35,15 +67,6 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - 从 `@BotFather` 获取的 Telegram Bot Token
 
 ## 安装
-
-运行安装脚本，并传入 bot token、允许访问的 Telegram 用户或群聊，以及工作区路径：
-
-```bash
-python3 scripts/install.py \
-  --bot-token "<telegram-bot-token>" \
-  --allow-user "<your-telegram-user-id>" \
-  --workspace main=/Users/your-name/projects/telegram-codex-bridge
-```
 
 常用可选参数：
 
@@ -78,6 +101,15 @@ python3 scripts/service_control.py status
 - `/new`：新建一个 Telegram 线程
 - `/stop`：停止当前执行任务
 - `/help`：查看帮助
+
+## 仓库结构
+
+- `src/telegram_codex_bridge/`：桥接器运行时实现
+- `scripts/`：安装、卸载、自检、服务控制脚本
+- `tests/`：pytest 测试集
+- `references/`：配置和操作参考
+- `SKILL.md`：Codex 技能入口
+- `agents/openai.yaml`：技能 UI 元数据
 
 ## 作为 Codex Skill 使用
 
