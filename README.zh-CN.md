@@ -128,6 +128,24 @@ ln -sfn /path/to/telegram-codex-bridge ~/.codex/skills/telegram-codex-bridge
 - 如果 bot token 曾被公开暴露，请到 `@BotFather` 撤销并重新生成
 - 开源前请查看 [`docs/OPEN_SOURCE_RELEASE.md`](docs/OPEN_SOURCE_RELEASE.md)
 
+## 常见问题
+
+### 为什么机器人在群里不回复？
+
+请确认这个群已经加入允许列表，机器人的隐私设置符合预期，并且桥接器配置中已写入该群的 chat id。
+
+### 为什么我在 Telegram 里切换模型，不会影响桌面端 Codex？
+
+这是刻意设计的。Telegram 使用的模型和推理精度覆盖只作用于 Telegram 任务，不会改动全局 Codex 配置。
+
+### 能不能从 Telegram 继续之前桌面端创建的线程？
+
+可以。先用 `/threads` 查看最近线程，再用 `/thread <名称|ID>` 绑定到对应线程。
+
+### 如果语音转写失败怎么办？
+
+优先检查 `ffmpeg`、Whisper 依赖，以及 `~/.codex/telegram-bridge/logs/` 下的桥接器日志。
+
 ## 开发
 
 运行测试：

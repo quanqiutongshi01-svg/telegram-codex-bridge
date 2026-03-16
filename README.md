@@ -128,6 +128,24 @@ Then restart Codex.
 - Revoke and replace any Telegram bot token that has ever been shared publicly
 - Review [docs/OPEN_SOURCE_RELEASE.md](docs/OPEN_SOURCE_RELEASE.md) before publishing
 
+## FAQ
+
+### Why does the bot not reply in a group?
+
+Make sure the bot is allowed in that group, privacy settings are configured correctly, and the group chat id is in the bridge allowlist.
+
+### Why do Telegram model changes not affect desktop Codex?
+
+That is intentional. Telegram-only model and reasoning overrides are isolated from the global Codex config.
+
+### Can I continue an existing desktop thread from Telegram?
+
+Yes. Use `/threads` to list recent threads and `/thread <name|id>` to attach the chat to one of them.
+
+### What should I do if voice transcription fails?
+
+Check `ffmpeg`, Whisper dependencies, and bridge logs under `~/.codex/telegram-bridge/logs/`.
+
 ## Development
 
 Run tests:

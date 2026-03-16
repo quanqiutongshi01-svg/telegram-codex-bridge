@@ -1,0 +1,18 @@
+bot_token = "123456789:replace-me"
+codex_binary = "/Applications/Codex.app/Contents/Resources/codex"
+ffmpeg_binary = "/opt/homebrew/bin/ffmpeg"
+default_model = "gpt-5.4"
+default_reasoning_effort = "high"
+default_plan_mode = false
+quick_models = ["gpt-5.4", "gpt-5.4-mini"]
+allowed_user_ids = [123456789]
+allowed_chat_ids = [-1001234567890]
+log_level = "INFO"
+polling_timeout = 30
+whisper_model = "base"
+whisper_language = "zh"
+runtime_dir = "/Users/your-name/.codex/telegram-bridge"
+
+[[workspaces]]
+name = "main"
+path = "/Users/your-name/projects/telegram-codex-bridge"
