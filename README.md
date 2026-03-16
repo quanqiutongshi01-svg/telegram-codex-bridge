@@ -50,13 +50,13 @@ flowchart LR
     B --> A
 ```
 
-## Visual Direction
+## Official Icon
 
-Three original icon concepts live in [`docs/assets/`](docs/assets):
+The project now uses the following official icon:
 
-- `logo-option-a.svg`: command-ring emblem
-- `logo-option-b.svg`: hex shield mark
-- `logo-option-c.svg`: tactical wordmark badge
+![Telegram Codex Bridge icon](assets/brand-icon-large.png)
+
+The Codex skill metadata also points to this icon through [`agents/openai.yaml`](agents/openai.yaml).
 
 ## Requirements
 

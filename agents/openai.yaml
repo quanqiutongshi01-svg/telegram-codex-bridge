@@ -1,4 +1,7 @@
 interface:
   display_name: "Telegram Codex Bridge / Telegram Codex 桥接器"
   short_description: "Install and manage a Telegram Codex bridge / 安装和管理 Telegram Codex 桥接器"
+  icon_small: "./assets/brand-icon-small.png"
+  icon_large: "./assets/brand-icon-large.png"
+  brand_color: "#87ABD6"
   default_prompt: "Use $telegram-codex-bridge to install or manage a local Telegram bridge for Codex. 使用 $telegram-codex-bridge 安装或管理本地 Telegram Codex 桥接器。"

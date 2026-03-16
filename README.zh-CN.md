@@ -50,13 +50,13 @@ flowchart LR
     B --> A
 ```
 
-## 视觉方案
+## 正式图标
 
-仓库里带了 3 版原创图标概念稿，位于 [`docs/assets/`](docs/assets)：
+项目现在采用这张正式图标：
 
-- `logo-option-a.svg`：指挥环徽章
-- `logo-option-b.svg`：六边形护盾
-- `logo-option-c.svg`：战术横版标识
+![Telegram Codex Bridge icon](assets/brand-icon-large.png)
+
+Codex skill 的元数据也已经通过 [`agents/openai.yaml`](agents/openai.yaml) 指向这张图。
 
 ## 环境要求
 
