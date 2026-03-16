@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "telegram-codex-bridge"
 version = "0.1.0"
-description = "Installable Telegram bridge for local Codex sessions on macOS."
+description = "Installable Telegram bridge for local Codex sessions on macOS / 适用于 macOS 本地 Codex 会话的 Telegram 桥接器。"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

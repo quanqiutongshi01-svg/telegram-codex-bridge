@@ -1,0 +1,21 @@
+<svg width="960" height="960" viewBox="0 0 960 960" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="960" fill="#0A0A0D"/>
+  <circle cx="480" cy="480" r="340" fill="#111318" stroke="#D83A34" stroke-width="18"/>
+  <circle cx="480" cy="480" r="292" fill="none" stroke="#2A2E37" stroke-width="2"/>
+  <circle cx="480" cy="480" r="250" fill="none" stroke="#2A2E37" stroke-width="2"/>
+  <path d="M180 480H300" stroke="#D83A34" stroke-width="16"/>
+  <path d="M660 480H780" stroke="#D83A34" stroke-width="16"/>
+  <path d="M480 140V250" stroke="#D83A34" stroke-width="16"/>
+  <path d="M480 710V820" stroke="#D83A34" stroke-width="16"/>
+  <path d="M322 315L272 265" stroke="#F3A53B" stroke-width="12"/>
+  <path d="M638 315L688 265" stroke="#F3A53B" stroke-width="12"/>
+  <path d="M322 645L272 695" stroke="#F3A53B" stroke-width="12"/>
+  <path d="M638 645L688 695" stroke="#F3A53B" stroke-width="12"/>
+  <path d="M398 300L290 408V552L398 660H564L672 552V408L564 300H398Z" fill="#141922" stroke="#D83A34" stroke-width="14"/>
+  <path d="M432 372L366 438V522L432 588H522L568 542H462L412 492V468L462 418H568L522 372H432Z" fill="#F3E9D2"/>
+  <path d="M562 415L626 480L562 545" stroke="#F3A53B" stroke-width="26" stroke-linecap="square"/>
+  <path d="M202 230C264 197 339 180 480 180C621 180 696 197 758 230" stroke="#D83A34" stroke-width="10"/>
+  <path d="M202 730C264 763 339 780 480 780C621 780 696 763 758 730" stroke="#D83A34" stroke-width="10"/>
+  <text x="480" y="108" text-anchor="middle" fill="#F3E9D2" font-size="34" font-family="Helvetica, Arial, sans-serif" letter-spacing="8">TELEGRAM CODEX BRIDGE</text>
+  <text x="480" y="878" text-anchor="middle" fill="#8E949E" font-size="22" font-family="Helvetica, Arial, sans-serif" letter-spacing="7">COMMAND RELAY FOR LOCAL AGENTS</text>
+</svg>

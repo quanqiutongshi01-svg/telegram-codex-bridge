@@ -1,8 +1,12 @@
-# Telegram Codex Bridge
+# Telegram Codex Bridge / Telegram Codex 桥接器
+
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 An installable macOS bridge that keeps a local Codex session reachable through Telegram.
+一个可安装的 macOS 桥接器，让本地 Codex 会话可以持续通过 Telegram 访问。
 
 It supports:
+它支持：
 
 - Telegram text tasks
 - Image and document input
@@ -14,6 +18,14 @@ It supports:
 - `launchd` service management on macOS
 
 This repository is also structured as a Codex skill, so it can be linked into `$CODEX_HOME/skills`.
+
+## Visual Direction
+
+Three original icon concepts live in [`docs/assets/`](docs/assets):
+
+- `logo-option-a.svg`: command-ring emblem
+- `logo-option-b.svg`: hex shield mark
+- `logo-option-c.svg`: tactical wordmark badge
 
 ## Requirements
 

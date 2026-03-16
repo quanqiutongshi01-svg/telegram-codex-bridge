@@ -1,0 +1,23 @@
+<svg width="1400" height="840" viewBox="0 0 1400 840" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1400" height="840" fill="#090A0E"/>
+  <rect x="88" y="130" width="1224" height="580" rx="28" fill="#11141B" stroke="#D83A34" stroke-width="12"/>
+  <path d="M88 236H1312" stroke="#D83A34" stroke-width="10"/>
+  <path d="M88 604H1312" stroke="#D83A34" stroke-width="10"/>
+  <path d="M160 184H332" stroke="#F3A53B" stroke-width="8"/>
+  <path d="M1068 184H1240" stroke="#F3A53B" stroke-width="8"/>
+  <path d="M160 656H332" stroke="#F3A53B" stroke-width="8"/>
+  <path d="M1068 656H1240" stroke="#F3A53B" stroke-width="8"/>
+  <circle cx="340" cy="420" r="154" fill="#0E1118" stroke="#D83A34" stroke-width="12"/>
+  <circle cx="340" cy="420" r="122" fill="none" stroke="#2A2E37" stroke-width="2"/>
+  <path d="M302 338L246 394V446L302 502H390L426 466H330L298 434V406L330 374H426L390 338H302Z" fill="#F3E9D2"/>
+  <path d="M414 370L474 420L414 470" stroke="#F3A53B" stroke-width="22" stroke-linecap="square"/>
+  <text x="590" y="368" fill="#F3E9D2" font-size="74" font-family="Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="5">TELEGRAM</text>
+  <text x="590" y="470" fill="#D83A34" font-size="110" font-family="Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="8">CODEX BRIDGE</text>
+  <text x="592" y="554" fill="#9096A0" font-size="28" font-family="Helvetica, Arial, sans-serif" letter-spacing="8">TACTICAL RELAY FOR LOCAL AGENT OPERATIONS</text>
+  <path d="M590 594H1180" stroke="#F3A53B" stroke-width="8"/>
+  <path d="M590 610H1008" stroke="#2A2E37" stroke-width="4"/>
+  <path d="M160 236L224 304" stroke="#D83A34" stroke-width="10"/>
+  <path d="M1240 236L1176 304" stroke="#D83A34" stroke-width="10"/>
+  <path d="M160 604L224 536" stroke="#D83A34" stroke-width="10"/>
+  <path d="M1240 604L1176 536" stroke="#D83A34" stroke-width="10"/>
+</svg>

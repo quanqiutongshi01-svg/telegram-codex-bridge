@@ -1,0 +1,18 @@
+<svg width="960" height="960" viewBox="0 0 960 960" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="960" fill="#090A0E"/>
+  <path d="M480 98L760 258V582L480 842L200 582V258L480 98Z" fill="#12151C" stroke="#D83A34" stroke-width="18"/>
+  <path d="M480 156L706 285V555L480 743L254 555V285L480 156Z" fill="none" stroke="#2A2E37" stroke-width="3"/>
+  <path d="M260 318H700" stroke="#D83A34" stroke-width="14"/>
+  <path d="M260 646H700" stroke="#D83A34" stroke-width="14"/>
+  <path d="M320 702H640" stroke="#F3A53B" stroke-width="8"/>
+  <path d="M328 250H632" stroke="#F3A53B" stroke-width="8"/>
+  <path d="M360 350H600L652 402V558L600 610H360L308 558V402L360 350Z" fill="#0E1118" stroke="#F3E9D2" stroke-width="10"/>
+  <path d="M404 402L358 448V512L404 558H500L534 524H438L414 500V460L438 436H534L500 402H404Z" fill="#F3E9D2"/>
+  <path d="M548 430L610 480L548 530" stroke="#D83A34" stroke-width="22" stroke-linecap="square"/>
+  <path d="M186 258L290 318" stroke="#D83A34" stroke-width="10"/>
+  <path d="M670 318L774 258" stroke="#D83A34" stroke-width="10"/>
+  <path d="M186 582L290 642" stroke="#D83A34" stroke-width="10"/>
+  <path d="M670 642L774 582" stroke="#D83A34" stroke-width="10"/>
+  <text x="480" y="70" text-anchor="middle" fill="#F3E9D2" font-size="38" font-family="Helvetica, Arial, sans-serif" letter-spacing="10">CODEX TELEGRAM RELAY</text>
+  <text x="480" y="910" text-anchor="middle" fill="#8E949E" font-size="22" font-family="Helvetica, Arial, sans-serif" letter-spacing="6">HEX SHIELD CONCEPT</text>
+</svg>
