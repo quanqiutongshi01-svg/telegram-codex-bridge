@@ -246,6 +246,10 @@ def test_project_overview_includes_threads_and_project_tasks(tmp_path) -> None:
             },
         )()
     ]
+    bridge.session_catalog.recent_thread_messages = lambda session_id, limit=8: [
+        type("Message", (), {"role": "user", "text": "可以，你做吧"})(),
+        type("Message", (), {"role": "assistant", "text": "已经做了第一版 v0.1"})(),
+    ]
     bridge.state.add_task(
         chat_id=7,
         workspace_name="project",
@@ -260,6 +264,104 @@ def test_project_overview_includes_threads_and_project_tasks(tmp_path) -> None:
     assert "项目概览：project" in text
     assert "项目对话" in text
     assert "继续完善项目" in text
+
+
+def test_status_text_includes_project_activity(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+        active_project_name="project",
+        active_project_cwd=project_path,
+        active_session_id="session-1",
+    )
+    bridge.session_catalog.list_threads = lambda **kwargs: [
+        type(
+            "Thread",
+            (),
+            {
+                "session_id": "session-1",
+                "display_name": "规划双网切换应用",
+                "cwd": project_path,
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        )()
+    ]
+    bridge.session_catalog.recent_thread_messages = lambda session_id, limit=8: [
+        type("Message", (), {"role": "user", "text": "可以，你做吧"})(),
+        type("Message", (), {"role": "assistant", "text": "已经做了第一版 v0.1"})(),
+    ]
+    bridge.state.add_task(
+        chat_id=7,
+        workspace_name="project",
+        prompt="实现网卡状态检测",
+        status="completed",
+        dangerous=False,
+        project_path=project_path,
+    )
+
+    text = bridge._status_text(settings)
+
+    assert "当前项目：project" in text
+    assert "最近对话：" in text
+    assert "* 规划双网切换应用" in text
+    assert "当前项目最近任务：" in text
+    assert "实现网卡状态检测" in text
+
+
+def test_thread_switch_text_includes_project_activity(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+        active_project_name="project",
+        active_project_cwd=project_path,
+        active_session_id="session-1",
+    )
+    bridge.session_catalog.list_threads = lambda **kwargs: [
+        type(
+            "Thread",
+            (),
+            {
+                "session_id": "session-1",
+                "display_name": "规划双网切换应用",
+                "cwd": project_path,
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        )()
+    ]
+    bridge.session_catalog.recent_thread_messages = lambda session_id, limit=8: [
+        type("Message", (), {"role": "user", "text": "可以，你做吧"})(),
+        type("Message", (), {"role": "assistant", "text": "已经做了第一版 v0.1"})(),
+    ]
+    bridge.state.add_task(
+        chat_id=7,
+        workspace_name="project",
+        prompt="继续 UI 菜单",
+        status="queued",
+        dangerous=False,
+        project_path=project_path,
+    )
+
+    text = bridge._thread_switch_text(settings, "规划双网切换应用", project_path)
+
+    assert "对话续聊：规划双网切换应用" in text
+    assert "当前对话最近内容：" in text
+    assert "你：可以，你做吧" in text
+    assert "Codex：已经做了第一版 v0.1" in text
+    assert "最近对话：" in text
+    assert "当前项目最近任务：" in text
+    assert "继续 UI 菜单" in text
 
 
 def test_project_overview_falls_back_to_legacy_task_rows(tmp_path) -> None:
@@ -288,3 +390,31 @@ def test_project_overview_falls_back_to_legacy_task_rows(tmp_path) -> None:
 
     assert "旧记录按名称匹配" in text
     assert "旧任务记录" in text
+
+
+def test_project_overview_does_not_use_generic_main_legacy_rows(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+        active_project_name="project",
+        active_project_cwd=project_path,
+    )
+    bridge.session_catalog.list_threads = lambda **kwargs: []
+    bridge.state.add_task(
+        chat_id=7,
+        workspace_name="main",
+        prompt="你好啊",
+        status="completed",
+        dangerous=False,
+    )
+
+    text = bridge._project_overview_text(settings)
+
+    assert "你好啊" not in text
+    assert "还没有能确认属于这个项目的任务记录" in text

@@ -34,7 +34,7 @@ path = "/Users/your-name/projects/telegram-codex-bridge"
 ## Telegram commands
 
 - `/menu`: open the Telegram control panel.
-- `/status`: current workspace, Telegram-only model/effort/plan mode, queue state.
+- `/status`: current workspace, Telegram-only model/effort/plan mode, queue state, plus recent conversations and recent task activity for the selected project.
 - `/doctor`: quick bridge self-check.
 - `/logs`: show recent service stdout/stderr snippets.
 - `/tasks`: show recent task history for the current chat.

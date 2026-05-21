@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 
 
 @dataclass(slots=True)
@@ -23,6 +24,13 @@ class SavedCodexProject:
     path: Path
     thread_count: int
     updated_at: str
+
+
+@dataclass(slots=True)
+class SavedCodexMessage:
+    role: str
+    text: str
+    timestamp: str
 
 
 class ThreadLookupError(LookupError):
@@ -105,6 +113,39 @@ class SessionCatalog:
             return projects
         return projects[:limit]
 
+    def recent_thread_messages(self, session_id: str, *, limit: int = 8) -> list[SavedCodexMessage]:
+        session_file = self._session_file(session_id)
+        if session_file is None:
+            return []
+        messages: list[SavedCodexMessage] = []
+        with session_file.open() as handle:
+            for raw_line in handle:
+                try:
+                    row = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("type") != "response_item":
+                    continue
+                payload = row.get("payload", {})
+                if payload.get("type") != "message":
+                    continue
+                role = payload.get("role")
+                if role not in {"user", "assistant"}:
+                    continue
+                if role == "assistant" and payload.get("phase") == "commentary":
+                    continue
+                text = self._clean_message_preview(self._message_text(payload.get("content", [])))
+                if not text:
+                    continue
+                messages.append(
+                    SavedCodexMessage(
+                        role=role,
+                        text=text,
+                        timestamp=row.get("timestamp", ""),
+                    )
+                )
+        return messages[-limit:]
+
     def resolve_thread(self, query: str) -> SavedCodexThread:
         normalized = query.strip()
         if not normalized:
@@ -141,12 +182,10 @@ class SessionCatalog:
         )
 
     def _load_session_cwd(self, session_id: str) -> Path | None:
-        if not self.sessions_root.exists():
+        session_file = self._session_file(session_id)
+        if session_file is None:
             return None
-        matches = sorted(self.sessions_root.rglob(f"*{session_id}.jsonl"))
-        if not matches:
-            return None
-        with matches[-1].open() as handle:
+        with session_file.open() as handle:
             first_line = handle.readline().strip()
         if not first_line:
             return None
@@ -158,3 +197,39 @@ class SessionCatalog:
             return None
         cwd = payload.get("payload", {}).get("cwd")
         return Path(cwd).expanduser().resolve() if cwd else None
+
+    def _session_file(self, session_id: str) -> Path | None:
+        if not self.sessions_root.exists():
+            return None
+        matches = sorted(self.sessions_root.rglob(f"*{session_id}.jsonl"))
+        return matches[-1] if matches else None
+
+    @staticmethod
+    def _message_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return ""
+        chunks = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") not in {"input_text", "output_text", "text"}:
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                chunks.append(text)
+        return "\n".join(chunks)
+
+    @staticmethod
+    def _clean_message_preview(text: str) -> str:
+        text = text.strip()
+        if not text:
+            return ""
+        if text.startswith(("<environment_context>", "<permissions instructions>", "<app-context>")):
+            return ""
+        if "## My request for Codex:" in text:
+            text = text.split("## My request for Codex:", 1)[1]
+        text = re.sub(r"<image\b[^>]*>.*?</image>", "[图片]", text, flags=re.DOTALL)
+        text = re.sub(r"# Files mentioned by the user:.*?(?=My request for Codex:|$)", "", text, flags=re.DOTALL)
+        return re.sub(r"\s+", " ", text).strip()

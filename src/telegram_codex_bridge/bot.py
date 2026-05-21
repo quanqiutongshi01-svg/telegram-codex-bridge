@@ -401,7 +401,7 @@ class TelegramCodexBridge:
         return "新的 Telegram 对话"
 
     def _threads_keyboard(self, settings: ChatSettings) -> InlineKeyboardMarkup | None:
-        recent_threads = self._project_threads(self._selected_project_path(settings), limit=6)
+        recent_threads = self._project_threads(self._selected_project_path(settings), limit=10)
         favorites = self.state.thread_favorites(settings.chat_id)
         if not recent_threads:
             return InlineKeyboardMarkup([[InlineKeyboardButton("切换项目", callback_data="menu:projects")]])
@@ -545,7 +545,7 @@ class TelegramCodexBridge:
     def _status_text(self, settings: ChatSettings) -> str:
         target = self._resolve_target(settings)
         worker = self._ensure_worker(target.context_label, target.path)
-        return (
+        status = (
             f"当前项目：{settings.active_project_name or self._project_display_name(self._selected_project_path(settings))}\n"
             f"当前对话：{self._current_thread_summary(settings)}\n"
             f"工作区配置：{settings.workspace_name}\n"
@@ -557,6 +557,7 @@ class TelegramCodexBridge:
             f"排队任务：{worker.queue.qsize()}\n"
             f"运行中：{'是' if worker.active_process else '否'}"
         )
+        return f"{status}\n\n{self._project_activity_text(settings)}"
 
     def _doctor_text(self, settings: ChatSettings) -> str:
         target = self._resolve_target(settings)
@@ -601,17 +602,29 @@ class TelegramCodexBridge:
             lines.append(f"- {row['status']}｜{row['workspace_name']}{danger}｜{prompt}")
         return "\n".join(lines)
 
-    def _project_task_rows(self, settings: ChatSettings, project_path: Path, *, limit: int = 5):
+    def _project_tasks_text(self, settings: ChatSettings) -> str:
+        project_path = self._selected_project_path(settings)
+        task_label, rows = self._project_task_rows(settings, project_path, limit=8)
+        if not rows:
+            return "当前项目还没有记录到任务。"
+        lines = [task_label]
+        for row in rows:
+            prompt = str(row["prompt"]).replace("\n", " ")[:56]
+            danger = "，提权" if row["dangerous"] else ""
+            lines.append(f"- {row['status']}｜{row['workspace_name']}{danger}｜{prompt}")
+        return "\n".join(lines)
+
+    def _project_task_rows(self, settings: ChatSettings, project_path: Path, *, limit: int = 8):
         rows = self.state.recent_tasks(settings.chat_id, limit=limit, project_path=project_path)
         if rows:
             return "当前项目最近任务：", rows
         candidate_names = {
-            settings.workspace_name,
             settings.active_project_name or "",
             settings.active_thread_name or "",
             self._project_display_name(project_path),
         }
-        candidate_names.discard("")
+        generic_names = {"", "main", "default", "workspace"}
+        candidate_names = {name for name in candidate_names if name not in generic_names}
         fallback_rows = [
             row
             for row in self.state.recent_tasks(settings.chat_id, limit=30)
@@ -619,10 +632,50 @@ class TelegramCodexBridge:
         ][:limit]
         if fallback_rows:
             return "当前项目最近任务（旧记录按名称匹配）：", fallback_rows
-        global_rows = self.state.recent_tasks(settings.chat_id, limit=limit)
-        if global_rows:
-            return "最近 Telegram 任务（旧记录未绑定项目）：", global_rows
         return "最近进展：", []
+
+    def _project_activity_text(self, settings: ChatSettings, *, thread_limit: int = 10, task_limit: int = 8) -> str:
+        project_path = self._selected_project_path(settings)
+        threads = self._project_threads(project_path, limit=thread_limit)
+        task_label, task_rows = self._project_task_rows(settings, project_path, limit=task_limit)
+        lines = [
+            "最近对话：",
+        ]
+        if threads:
+            for thread in threads:
+                marker = "* " if thread.session_id == settings.active_session_id else "- "
+                lines.append(f"{marker}{thread.display_name} [{thread.session_id[:8]}]")
+        else:
+            lines.append("- 这个项目还没有本地 Codex 对话记录。")
+        lines.extend(["", task_label])
+        if task_rows:
+            for row in task_rows:
+                prompt = str(row["prompt"]).replace("\n", " ")[:56]
+                lines.append(f"- {row['status']}｜{prompt}")
+        else:
+            lines.append("- Telegram 里还没有能确认属于这个项目的任务记录。")
+        return "\n".join(lines)
+
+    def _thread_recent_text(self, session_id: str | None, *, limit: int = 8) -> str:
+        lines = ["当前对话最近内容："]
+        if not session_id:
+            lines.append("- 这是一个新的 Telegram 对话，还没有本地历史。")
+            return "\n".join(lines)
+        messages = self.session_catalog.recent_thread_messages(session_id, limit=limit)
+        if not messages:
+            lines.append("- 没有读到这条对话的可展示历史，可能是旧版 Codex 记录格式。")
+            return "\n".join(lines)
+        for message in messages:
+            speaker = "你" if message.role == "user" else "Codex"
+            lines.append(f"- {speaker}：{self._compact_preview(message.text, 96)}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _compact_preview(text: str, limit: int) -> str:
+        normalized = " ".join(text.split())
+        if len(normalized) <= limit:
+            return normalized
+        return f"{normalized[: limit - 1]}…"
 
     def _project_git_summary(self, project_path: Path) -> str:
         try:
@@ -658,31 +711,25 @@ class TelegramCodexBridge:
     def _project_overview_text(self, settings: ChatSettings) -> str:
         project_path = self._selected_project_path(settings)
         project_name = settings.active_project_name or self._project_display_name(project_path)
-        threads = self._project_threads(project_path, limit=5)
-        task_label, task_rows = self._project_task_rows(settings, project_path, limit=5)
         lines = [
             f"项目概览：{project_name}",
             f"路径：{project_path}",
             "",
             self._project_git_summary(project_path),
             "",
-            "最近对话：",
+            self._project_activity_text(settings),
         ]
-        if threads:
-            for thread in threads:
-                marker = "* " if thread.session_id == settings.active_session_id else "- "
-                lines.append(f"{marker}{thread.display_name} [{thread.session_id[:8]}]")
-        else:
-            lines.append("- 这个项目还没有本地 Codex 对话记录。")
-        lines.extend(["", task_label])
-        if task_rows:
-            for row in task_rows:
-                prompt = str(row["prompt"]).replace("\n", " ")[:56]
-                lines.append(f"- {row['status']}｜{prompt}")
-        else:
-            lines.append("- Telegram 里还没有这个项目的任务记录。")
         lines.extend(["", "你可以继续发任务，也可以点“对话”接上某个历史对话。"])
         return "\n".join(lines)
+
+    def _thread_switch_text(self, settings: ChatSettings, thread_name: str, thread_cwd: Path) -> str:
+        return (
+            f"对话续聊：{thread_name}\n"
+            f"执行目录：{thread_cwd}\n\n"
+            f"{self._thread_recent_text(settings.active_session_id, limit=8)}\n\n"
+            f"{self._project_activity_text(settings, thread_limit=10, task_limit=8)}\n\n"
+            "你可以直接继续交代任务，或者点下面按钮切换到其它对话。"
+        )
 
     def _logs_text(self) -> str:
         err_log = self.config.logs_dir / "service.err.log"
@@ -1004,8 +1051,9 @@ class TelegramCodexBridge:
             return
         settings = self._chat_settings(update.effective_chat.id)
         project_path = self._selected_project_path(settings) if context.args and context.args[0] == "project" else None
+        text = self._project_tasks_text(settings) if project_path else self._recent_tasks_text(update.effective_chat.id)
         await update.effective_message.reply_text(
-            self._recent_tasks_text(update.effective_chat.id, project_path),
+            text,
             reply_markup=self._menu_keyboard(),
         )
 
@@ -1216,7 +1264,10 @@ class TelegramCodexBridge:
         self.state.update_chat_settings(settings)
         self.state.record_project_usage(settings.chat_id, thread.cwd, settings.active_project_name)
         self._ensure_worker(thread.display_name, thread.cwd)
-        await update.effective_message.reply_text(f"已切换到对话“{thread.display_name}”。\n执行目录：{thread.cwd}")
+        await update.effective_message.reply_text(
+            self._thread_switch_text(settings, thread.display_name, thread.cwd),
+            reply_markup=self._with_back_button(self._threads_keyboard(settings)),
+        )
 
     async def model_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -1385,7 +1436,7 @@ class TelegramCodexBridge:
             if value == "project_tasks":
                 await self._edit_callback_message(
                     query,
-                    self._recent_tasks_text(update.effective_chat.id, self._selected_project_path(settings)),
+                    self._project_tasks_text(settings),
                     reply_markup=self._menu_keyboard(),
                 )
                 return
@@ -1549,7 +1600,7 @@ class TelegramCodexBridge:
             self._ensure_worker(thread.display_name, thread.cwd)
             await self._edit_callback_message(
                 query,
-                f"已切换到对话“{thread.display_name}”。\n执行目录：{thread.cwd}",
+                self._thread_switch_text(settings, thread.display_name, thread.cwd),
                 reply_markup=self._with_back_button(self._threads_keyboard(settings)),
             )
             return

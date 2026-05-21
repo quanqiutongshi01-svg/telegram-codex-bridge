@@ -47,6 +47,71 @@ def test_session_catalog_resolves_thread_and_loads_cwd(tmp_path) -> None:
     assert thread.cwd == (tmp_path / "workspace").resolve()
 
 
+def test_session_catalog_reads_recent_thread_messages(tmp_path) -> None:
+    codex_home = tmp_path / ".codex"
+    sessions_root = codex_home / "sessions" / "2026" / "03" / "16"
+    sessions_root.mkdir(parents=True)
+    (sessions_root / "rollout-abc123.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "session_meta", "payload": {"cwd": str(tmp_path)}}),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-16T00:00:01Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "<environment_context>hidden</environment_context>"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-16T00:00:02Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "继续做网络切换"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-16T00:00:03Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "phase": "commentary",
+                            "content": [{"type": "output_text", "text": "我先检查代码。"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-03-16T00:00:04Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "已经补好 WPF 项目骨架。"}],
+                        },
+                    }
+                ),
+            ]
+        )
+    )
+
+    messages = SessionCatalog(codex_home).recent_thread_messages("abc123", limit=5)
+
+    assert [(message.role, message.text) for message in messages] == [
+        ("user", "继续做网络切换"),
+        ("assistant", "已经补好 WPF 项目骨架。"),
+    ]
+
+
 def test_session_catalog_groups_projects_and_filters_threads(tmp_path) -> None:
     codex_home = tmp_path / ".codex"
     sessions_root = codex_home / "sessions" / "2026" / "03" / "16"
