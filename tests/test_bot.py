@@ -1,0 +1,101 @@
+import asyncio
+
+import pytest
+
+pytest.importorskip("telegram")
+
+from telegram_codex_bridge.bot import QueuedTask, TelegramCodexBridge, WorkspaceWorker
+from telegram_codex_bridge.codex import TaskInput
+from telegram_codex_bridge.config import BridgeConfig, WorkspaceConfig
+from telegram_codex_bridge.state import ChatSettings, StateStore
+
+
+def make_bridge(tmp_path) -> TelegramCodexBridge:
+    workspace_path = tmp_path / "workspace"
+    workspace_path.mkdir()
+    state = StateStore(tmp_path / "state.db")
+    state.initialize()
+    config = BridgeConfig(
+        bot_token="token",
+        workspaces=[WorkspaceConfig(name="main", path=workspace_path)],
+        runtime_dir=tmp_path / "runtime",
+    )
+    return TelegramCodexBridge(config=config, state=state)
+
+
+def make_job(tmp_path, source_description: str = "text") -> QueuedTask:
+    workspace_path = (tmp_path / "workspace").resolve()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+    )
+    task = TaskInput(
+        prompt="你好",
+        workspace_name="main",
+        workspace_path=workspace_path,
+        chat_id=7,
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+    )
+    return QueuedTask(
+        task=task,
+        settings_snapshot=settings,
+        worker_key=str(workspace_path),
+        context_label="main",
+        reply_to_message_id=12,
+        source_description=source_description,
+    )
+
+
+def test_render_task_status_for_queued_job_shows_queue_position(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    queued_job = make_job(tmp_path)
+    active_job = make_job(tmp_path, source_description="voice")
+    worker = WorkspaceWorker(
+        key="main",
+        name="main",
+        path=(tmp_path / "workspace").resolve(),
+        queue=asyncio.Queue(),
+    )
+    worker.active_job = active_job
+    asyncio.run(worker.queue.put(queued_job))
+
+    text = bridge._render_task_status(queued_job, worker, "排队中")
+
+    assert "任务状态：排队中" in text
+    assert "来源：文字" in text
+    assert "前方任务：1" in text
+
+
+def test_render_task_status_for_running_job_shows_progress_detail(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    job = make_job(tmp_path, source_description="approval")
+    worker = WorkspaceWorker(
+        key="main",
+        name="main",
+        path=(tmp_path / "workspace").resolve(),
+        queue=asyncio.Queue(),
+    )
+
+    text = bridge._render_task_status(job, worker, "执行中", "pytest -q")
+
+    assert "任务状态：执行中" in text
+    assert "来源：授权重试" in text
+    assert "进度：pytest -q" in text
+    assert "前方任务" not in text
+
+
+def test_detect_existing_paths_supports_spaces(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    output_dir = tmp_path / "video outputs"
+    output_dir.mkdir()
+    video_path = output_dir / "demo clip.mp4"
+    video_path.write_bytes(b"fake video")
+
+    paths = bridge._detect_existing_paths(f"已生成视频：{video_path}，可以回传。")
+
+    assert paths == [video_path.resolve()]

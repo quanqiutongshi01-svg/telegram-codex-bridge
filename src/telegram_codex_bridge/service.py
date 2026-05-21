@@ -28,6 +28,8 @@ async def _main() -> None:
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     state = StateStore(config.state_db_path)
     state.initialize()
     bridge = TelegramCodexBridge(config=config, state=state)

@@ -72,7 +72,7 @@ Codex skill 的元数据也已经通过 [`agents/openai.yaml`](agents/openai.yam
 
 - `--allow-chat <group-chat-id>`：允许某个 Telegram 群使用
 - `--default-model <model>`：设置默认模型
-- `--default-effort <minimal|low|medium|high>`：设置默认推理精度
+- `--default-effort <low|medium|high|xhigh>`：设置默认推理精度
 - `--quick-model <model>`：重复传入可增加快捷模型选项
 
 ## 服务控制
@@ -96,7 +96,7 @@ python3 scripts/service_control.py status
 - `/workspaces`：查看工作区
 - `/workspace <name>`：切换工作区
 - `/model <id>`：设置仅 Telegram 生效的模型
-- `/effort <minimal|low|medium|high>`：设置仅 Telegram 生效的推理精度
+- `/effort <low|medium|high|xhigh>`：设置仅 Telegram 生效的推理精度
 - `/plan <on|off>`：切换仅 Telegram 生效的计划模式
 - `/new`：新建一个 Telegram 线程
 - `/stop`：停止当前执行任务

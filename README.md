@@ -72,7 +72,7 @@ Useful optional flags:
 
 - `--allow-chat <group-chat-id>`: allow a Telegram group
 - `--default-model <model>`
-- `--default-effort <minimal|low|medium|high>`
+- `--default-effort <low|medium|high|xhigh>`
 - `--quick-model <model>`: repeat to add more model shortcuts
 
 ## Service Control
@@ -96,7 +96,7 @@ python3 scripts/service_control.py status
 - `/workspaces`: list workspaces
 - `/workspace <name>`: switch workspace
 - `/model <id>`: set the Telegram-only model
-- `/effort <minimal|low|medium|high>`: set Telegram-only reasoning effort
+- `/effort <low|medium|high|xhigh>`: set Telegram-only reasoning effort
 - `/plan <on|off>`: toggle Telegram-only plan mode
 - `/new`: start a fresh Telegram thread
 - `/stop`: stop the current running task

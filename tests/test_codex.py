@@ -18,8 +18,11 @@ def test_build_command_includes_telegram_only_overrides(tmp_path: Path) -> None:
     command = build_command("codex", task, session_id="thread-123")
 
     assert command[:3] == ["codex", "exec", "resume"]
+    assert "--disable" in command
+    assert "plugins" in command
     assert '-c' in command
     assert 'model_reasoning_effort="low"' in command
+    assert 'web_search="disabled"' in command
     assert "-m" in command
     assert "thread-123" in command
     assert str(tmp_path / "image.png") in command
@@ -41,6 +44,23 @@ def test_resume_command_omits_workspace_only_flags(tmp_path: Path) -> None:
     assert "-C" not in command
     assert "--skip-git-repo-check" in command
     assert "thread-123" in command
+
+
+def test_build_command_maps_legacy_minimal_effort_to_low(tmp_path: Path) -> None:
+    task = TaskInput(
+        prompt="Continue",
+        workspace_name="main",
+        workspace_path=tmp_path,
+        chat_id=1,
+        model="gpt-5.4",
+        reasoning_effort="minimal",
+        plan_mode=False,
+    )
+
+    command = build_command("codex", task, session_id=None)
+
+    assert 'model_reasoning_effort="low"' in command
+    assert 'model_reasoning_effort="minimal"' not in command
 
 
 def test_build_prompt_mentions_selected_thread_and_execution_root(tmp_path: Path) -> None:

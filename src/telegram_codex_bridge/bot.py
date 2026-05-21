@@ -19,6 +19,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ChatAction, ChatType
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -37,7 +38,7 @@ from .transcribe import WhisperTranscriber
 
 
 LOGGER = logging.getLogger(__name__)
-EFFORT_CHOICES = ("minimal", "low", "medium", "high")
+EFFORT_CHOICES = ("low", "medium", "high", "xhigh")
 FILE_PATH_PATTERN = re.compile(r"(/[^ \n\r\t\]\)\"']+)")
 
 
@@ -49,6 +50,7 @@ class QueuedTask:
     context_label: str
     reply_to_message_id: int | None
     source_description: str
+    status_message_id: int | None = None
 
     def rerun_dangerous(self) -> "QueuedTask":
         return QueuedTask(
@@ -58,6 +60,7 @@ class QueuedTask:
             context_label=self.context_label,
             reply_to_message_id=self.reply_to_message_id,
             source_description=self.source_description,
+            status_message_id=self.status_message_id,
         )
 
 
@@ -195,17 +198,21 @@ class TelegramCodexBridge:
         if self._is_authorized(update):
             return True
         if update.effective_message:
-            await update.effective_message.reply_text("This chat is not authorized for the Telegram Codex Bridge.")
+            await update.effective_message.reply_text("这个聊天还没有被授权使用 Telegram Codex Bridge。")
         return False
 
     def _chat_settings(self, chat_id: int) -> ChatSettings:
-        return self.state.get_chat_settings(
+        settings = self.state.get_chat_settings(
             chat_id,
             default_workspace=self.config.default_workspace.name,
             default_model=self.config.default_model,
             default_effort=self.config.default_reasoning_effort,
             default_plan_mode=self.config.default_plan_mode,
         )
+        if settings.reasoning_effort == "minimal":
+            settings.reasoning_effort = "low"
+            self.state.update_chat_settings(settings)
+        return settings
 
     def _worker_key(self, path: Path) -> str:
         return str(path.expanduser().resolve())
@@ -381,6 +388,80 @@ class TelegramCodexBridge:
     def _binary_available(self, binary: str) -> bool:
         return shutil.which(binary) is not None or Path(binary).exists()
 
+    def _source_label(self, source_description: str) -> str:
+        labels = {
+            "text": "文字",
+            "image": "图片",
+            "video": "视频",
+            "document": "文档",
+            "voice": "语音",
+            "approval": "授权重试",
+        }
+        return labels.get(source_description, source_description)
+
+    def _queue_ahead_count(self, worker: WorkspaceWorker, job: QueuedTask) -> int:
+        ahead = max(worker.queue.qsize() - 1, 0)
+        if worker.active_job is not None and worker.active_job is not job:
+            ahead += 1
+        return ahead
+
+    def _render_task_status(self, job: QueuedTask, worker: WorkspaceWorker, state_label: str, detail: str | None = None) -> str:
+        lines = [
+            f"任务状态：{state_label}",
+            f"上下文：{job.context_label}",
+            f"来源：{self._source_label(job.source_description)}",
+            f"执行目录：{job.task.workspace_path}",
+            f"模型：{job.task.model}",
+            f"推理精度：{job.task.reasoning_effort}",
+            f"计划模式：{'开启' if job.task.plan_mode else '关闭'}",
+        ]
+        if state_label == "排队中":
+            lines.append(f"前方任务：{self._queue_ahead_count(worker, job)}")
+        if detail:
+            lines.append(f"进度：{detail}")
+        return "\n".join(lines)
+
+    async def _update_task_status_message(
+        self,
+        job: QueuedTask,
+        worker: WorkspaceWorker,
+        state_label: str,
+        *,
+        detail: str | None = None,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> None:
+        if self.application is None:
+            return
+        bot = self.application.bot
+        text = self._render_task_status(job, worker, state_label, detail)
+        try:
+            if job.status_message_id is None:
+                message = await bot.send_message(
+                    chat_id=job.task.chat_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    reply_to_message_id=job.reply_to_message_id,
+                )
+                job.status_message_id = message.message_id
+                return
+            await bot.edit_message_text(
+                chat_id=job.task.chat_id,
+                message_id=job.status_message_id,
+                text=text,
+                reply_markup=reply_markup,
+            )
+        except BadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+            LOGGER.debug("Failed to update task status card", exc_info=True)
+            message = await bot.send_message(
+                chat_id=job.task.chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                reply_to_message_id=job.reply_to_message_id,
+            )
+            job.status_message_id = message.message_id
+
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
             return
@@ -389,7 +470,7 @@ class TelegramCodexBridge:
             "/status - 查看当前工作状态\n"
             "/doctor - 快速自检桥接器运行状态\n"
             "/model [模型ID] - 查看或切换仅 Telegram 生效的模型\n"
-            "/effort [minimal|low|medium|high] - 查看或切换仅 Telegram 生效的推理精度\n"
+            "/effort [low|medium|high|xhigh] - 查看或切换仅 Telegram 生效的推理精度\n"
             "/plan [on|off] - 查看或切换仅 Telegram 生效的计划模式\n"
             "/workspaces - 查看已注册的工作区\n"
             "/workspace [名称] - 切换当前工作区\n"
@@ -537,7 +618,7 @@ class TelegramCodexBridge:
             return
         effort = context.args[0].lower()
         if effort not in EFFORT_CHOICES:
-            await update.effective_message.reply_text("推理精度只能是：minimal、low、medium、high。")
+            await update.effective_message.reply_text("推理精度只能是：low、medium、high、xhigh。")
             return
         settings.reasoning_effort = effort
         self.state.update_chat_settings(settings)
@@ -607,7 +688,7 @@ class TelegramCodexBridge:
         settings.active_thread_cwd = None
         self.state.update_chat_settings(settings)
         self.state.set_session_id(settings.workspace_name, None)
-        await update.effective_message.reply_text(f"Cleared the active Telegram thread for workspace profile {settings.workspace_name}.")
+        await update.effective_message.reply_text(f"已清空工作区 {settings.workspace_name} 当前绑定的 Telegram 线程。")
 
     async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -616,10 +697,10 @@ class TelegramCodexBridge:
         target = self._resolve_target(settings)
         worker = self._ensure_worker(target.context_label, target.path)
         if worker.active_process is None:
-            await update.effective_message.reply_text("No active task is running for the current Telegram thread.")
+            await update.effective_message.reply_text("当前 Telegram 线程没有正在运行的任务。")
             return
         worker.active_process.terminate()
-        await update.effective_message.reply_text("Stop signal sent to the active Telegram thread.")
+        await update.effective_message.reply_text("已向当前 Telegram 线程发送停止信号。")
 
     async def callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -761,12 +842,25 @@ class TelegramCodexBridge:
             return
         if action == "approve" and value in self.pending_approvals:
             task = self.pending_approvals.pop(value).rerun_dangerous()
+            if query.message is not None:
+                task.status_message_id = query.message.message_id
+            task.source_description = "approval"
             await self._enqueue_task(task, query.message.chat_id)
-            await query.edit_message_text("Approval accepted. Re-running the task with elevated execution.")
             return
         if action == "reject" and value in self.pending_approvals:
-            self.pending_approvals.pop(value, None)
-            await query.edit_message_text("Approval rejected. The pending task was discarded.")
+            task = self.pending_approvals.pop(value)
+            if query.message is not None:
+                task.status_message_id = query.message.message_id
+            worker = self._ensure_worker(task.context_label, task.task.workspace_path)
+            self.state.add_task(
+                chat_id=task.task.chat_id,
+                workspace_name=task.context_label,
+                prompt=task.task.prompt,
+                status="failed",
+                dangerous=task.task.dangerous,
+            )
+            await self._update_task_status_message(task, worker, "已失败", detail="你拒绝了提权请求，任务已取消。")
+            return
 
     async def text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -870,7 +964,7 @@ class TelegramCodexBridge:
             return
         message = update.effective_message
         assert message.voice is not None
-        await message.reply_text("Voice received. Transcribing locally with Whisper...")
+        await message.reply_text("已收到语音，正在用本地 Whisper 转写...")
         local_path = await self._download_file(
             await message.voice.get_file(),
             suffix=".ogg",
@@ -885,7 +979,7 @@ class TelegramCodexBridge:
             prompt=transcript,
             file_paths=[local_path],
         )
-        await message.reply_text(f"Transcription: {transcript}")
+        await message.reply_text(f"语音转写结果：{transcript}")
         await self._enqueue_task(
             QueuedTask(
                 task=task,
@@ -901,8 +995,43 @@ class TelegramCodexBridge:
     async def video_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
             return
-        await update.effective_message.reply_text(
-            "Video input is reserved for a later revision. I can still return video files, but I do not analyze video messages yet."
+        if not self._is_directed_to_bot(update):
+            return
+        message = update.effective_message
+        settings = self._chat_settings(update.effective_chat.id)
+        if message.video:
+            telegram_file = await message.video.get_file()
+            local_path = await self._download_file(
+                telegram_file,
+                suffix=".mp4",
+                chat_id=update.effective_chat.id,
+                media_kind="video",
+            )
+        elif message.document:
+            local_path = await self._download_document(message.document, update.effective_chat.id, "video-document")
+        else:
+            await update.effective_message.reply_text("这条视频消息没有拿到可下载的文件。")
+            return
+        prompt = self._strip_mention(message.caption or "") or (
+            "Please use the staged video file if relevant. "
+            "You can inspect it locally with ffmpeg or extract frames/audio when needed."
+        )
+        task, target = self._build_task_input(
+            chat_id=update.effective_chat.id,
+            settings=settings,
+            prompt=prompt,
+            file_paths=[local_path],
+        )
+        await self._enqueue_task(
+            QueuedTask(
+                task=task,
+                settings_snapshot=settings,
+                worker_key=target.worker_key,
+                context_label=target.context_label,
+                reply_to_message_id=message.message_id,
+                source_description="video",
+            ),
+            update.effective_chat.id,
         )
 
     async def _download_document(self, document, chat_id: int, media_kind: str) -> Path:
@@ -928,6 +1057,7 @@ class TelegramCodexBridge:
             status="queued",
             dangerous=queued_task.task.dangerous,
         )
+        await self._update_task_status_message(queued_task, worker, "排队中")
 
     async def _workspace_loop(self, worker: WorkspaceWorker) -> None:
         while True:
@@ -940,12 +1070,14 @@ class TelegramCodexBridge:
                 raise
             except Exception:  # noqa: BLE001
                 LOGGER.exception("Workspace job failed", extra={"workspace": worker.name})
-                if self.application:
-                    await self.application.bot.send_message(
-                        chat_id=job.task.chat_id,
-                        text="The Telegram bridge hit an unexpected error while running your task.",
-                        reply_to_message_id=job.reply_to_message_id,
-                    )
+                self.state.add_task(
+                    chat_id=job.task.chat_id,
+                    workspace_name=job.context_label,
+                    prompt=job.task.prompt,
+                    status="failed",
+                    dangerous=job.task.dangerous,
+                )
+                await self._update_task_status_message(job, worker, "已失败", detail="桥接器在执行任务时遇到了意外错误。")
             finally:
                 typing_task.cancel()
                 await asyncio.gather(typing_task, return_exceptions=True)
@@ -961,6 +1093,7 @@ class TelegramCodexBridge:
         session_id = self._task_session_id(job)
         final_messages: list[str] = []
         approval_triggered = False
+        await self._update_task_status_message(job, worker, "执行中")
 
         async def on_event(event: CodexEvent) -> None:
             nonlocal approval_triggered
@@ -971,19 +1104,12 @@ class TelegramCodexBridge:
                 return
             if event.kind == "command_started":
                 command = event.payload["command"].strip()
-                summary = f"Running: {command[:180]}"
+                summary = command[:180]
                 if summary != worker.last_progress_message:
                     worker.last_progress_message = summary
-                    await bot.send_message(chat_id=chat_id, text=summary, reply_to_message_id=job.reply_to_message_id)
+                    await self._update_task_status_message(job, worker, "执行中", detail=summary)
                 return
             if event.kind == "command_completed":
-                exit_code = event.payload.get("exit_code")
-                if exit_code not in (None, 0):
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"Command failed with exit code {exit_code}: {event.payload['command'][:160]}",
-                        reply_to_message_id=job.reply_to_message_id,
-                    )
                 return
             if event.kind == "agent_message":
                 text = event.payload.get("text", "").strip()
@@ -998,16 +1124,17 @@ class TelegramCodexBridge:
                 keyboard = InlineKeyboardMarkup(
                     [
                         [
-                            InlineKeyboardButton("Approve", callback_data=f"approve:{approval_id}"),
-                            InlineKeyboardButton("Reject", callback_data=f"reject:{approval_id}"),
+                            InlineKeyboardButton("批准", callback_data=f"approve:{approval_id}"),
+                            InlineKeyboardButton("拒绝", callback_data=f"reject:{approval_id}"),
                         ]
                     ]
                 )
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text="Codex requested elevated execution. Approve to rerun this task with dangerous execution enabled.",
+                await self._update_task_status_message(
+                    job,
+                    worker,
+                    "等待批准",
+                    detail="Codex 请求提权执行。批准后会按高权限重新运行这次任务。",
                     reply_markup=keyboard,
-                    reply_to_message_id=job.reply_to_message_id,
                 )
                 if worker.active_process:
                     worker.active_process.terminate()
@@ -1038,6 +1165,7 @@ class TelegramCodexBridge:
                 status="completed",
                 dangerous=job.task.dangerous,
             )
+            await self._update_task_status_message(job, worker, "已完成")
             await self._send_detected_files(chat_id, "\n".join(final_messages), job.reply_to_message_id)
             return
         self.state.add_task(
@@ -1047,18 +1175,13 @@ class TelegramCodexBridge:
             status="failed",
             dangerous=job.task.dangerous,
         )
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f"Codex exited with status {returncode}.",
-            reply_to_message_id=job.reply_to_message_id,
-        )
+        await self._update_task_status_message(job, worker, "已失败", detail=f"Codex 退出状态码：{returncode}")
 
     async def _send_detected_files(self, chat_id: int, text: str, reply_to_message_id: int | None) -> None:
         assert self.application is not None
         bot = self.application.bot
         sent_paths: set[Path] = set()
-        for match in FILE_PATH_PATTERN.findall(text):
-            path = Path(match)
+        for path in self._detect_existing_paths(text):
             if not path.is_absolute() or not path.exists() or path in sent_paths or not path.is_file():
                 continue
             sent_paths.add(path)
@@ -1066,11 +1189,51 @@ class TelegramCodexBridge:
             if mime and mime.startswith("image/"):
                 with path.open("rb") as handle:
                     await bot.send_photo(chat_id=chat_id, photo=handle, reply_to_message_id=reply_to_message_id)
+            elif mime and mime.startswith("video/"):
+                with path.open("rb") as handle:
+                    await bot.send_video(chat_id=chat_id, video=handle, reply_to_message_id=reply_to_message_id)
             else:
                 with path.open("rb") as handle:
                     await bot.send_document(chat_id=chat_id, document=handle, reply_to_message_id=reply_to_message_id)
             if len(sent_paths) >= 5:
                 break
+
+    def _detect_existing_paths(self, text: str) -> list[Path]:
+        paths: list[Path] = []
+        seen: set[Path] = set()
+
+        def add_path(path: Path) -> None:
+            if path.is_absolute() and path.exists() and path not in seen:
+                seen.add(path)
+                paths.append(path)
+
+        for match in FILE_PATH_PATTERN.findall(text):
+            add_path(Path(match))
+
+        for line in text.splitlines():
+            for match in re.finditer(r"/", line):
+                start = match.start()
+                if start > 0 and not line[start - 1].isspace() and line[start - 1] not in "([`\"':：":
+                    continue
+                path = self._existing_path_from_tail(line[start:])
+                if path is not None:
+                    add_path(path)
+        return paths
+
+    def _existing_path_from_tail(self, tail: str) -> Path | None:
+        candidate = tail.strip().strip("`\"'")
+        for separator in ("，", "。", "；"):
+            candidate = candidate.split(separator, 1)[0]
+        while candidate:
+            candidate = candidate.rstrip("`\"'.,;:：，。；)]}")
+            path = Path(candidate)
+            if path.exists():
+                return path.resolve()
+            parts = candidate.rsplit(maxsplit=1)
+            if len(parts) == 1:
+                return None
+            candidate = parts[0]
+        return None
 
     async def _typing_loop(self, chat_id: int) -> None:
         assert self.application is not None

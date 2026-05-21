@@ -32,6 +32,12 @@ class CodexEvent:
     payload: dict
 
 
+def normalize_reasoning_effort(effort: str) -> str:
+    if effort == "minimal":
+        return "low"
+    return effort
+
+
 def build_prompt(task: TaskInput) -> str:
     prompt = task.prompt.strip() or "Please review the provided Telegram input and help the user."
     lines = [
@@ -57,6 +63,13 @@ def build_prompt(task: TaskInput) -> str:
 
 def build_command(binary: str, task: TaskInput, session_id: str | None) -> list[str]:
     command = [binary, "exec"]
+    reasoning_effort = normalize_reasoning_effort(task.reasoning_effort)
+    stable_options = [
+        "--disable",
+        "plugins",
+        "-c",
+        'web_search="disabled"',
+    ]
     if session_id:
         command.append("resume")
         command.extend(
@@ -66,7 +79,7 @@ def build_command(binary: str, task: TaskInput, session_id: str | None) -> list[
                 "-m",
                 task.model,
                 "-c",
-                f'model_reasoning_effort="{task.reasoning_effort}"',
+                f'model_reasoning_effort="{reasoning_effort}"',
             ]
         )
     else:
@@ -79,9 +92,10 @@ def build_command(binary: str, task: TaskInput, session_id: str | None) -> list[
                 "-m",
                 task.model,
                 "-c",
-                f'model_reasoning_effort="{task.reasoning_effort}"',
+                f'model_reasoning_effort="{reasoning_effort}"',
             ]
         )
+    command.extend(stable_options)
     if task.dangerous:
         command.append("--dangerously-bypass-approvals-and-sandbox")
     for image_path in task.image_paths:
