@@ -67,7 +67,9 @@ def test_render_task_status_for_queued_job_shows_queue_position(tmp_path) -> Non
     text = bridge._render_task_status(queued_job, worker, "排队中")
 
     assert "任务状态：排队中" in text
+    assert "任务ID：" in text
     assert "来源：文字" in text
+    assert "风险等级：低" in text
     assert "前方任务：1" in text
 
 
@@ -180,3 +182,41 @@ def test_threads_keyboard_filters_by_selected_project(tmp_path) -> None:
     keyboard = bridge._threads_keyboard(settings)
 
     assert keyboard.inline_keyboard[0][0].text == "项目对话"
+
+
+def test_project_favorites_sort_first(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    favorite_path = (tmp_path / "favorite-project").resolve()
+    favorite_path.mkdir()
+    bridge.session_catalog.list_projects = lambda **kwargs: [
+        type(
+            "Project",
+            (),
+            {
+                "name": "favorite-project",
+                "path": favorite_path,
+                "thread_count": 1,
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        )()
+    ]
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+    )
+    bridge.state.set_project_favorite(7, favorite_path, "favorite-project", True)
+
+    keyboard = bridge._projects_keyboard(settings)
+
+    assert "★ favorite-project" in keyboard.inline_keyboard[0][0].text
+
+
+def test_voice_confirm_keyboard_marks_current_choice(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+
+    keyboard = bridge._voice_confirm_keyboard(True)
+
+    assert keyboard.inline_keyboard[0][0].text == "* 开启"

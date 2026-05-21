@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS chat_settings (
   active_thread_name TEXT,
   active_thread_cwd TEXT,
   active_project_name TEXT,
-  active_project_cwd TEXT
+  active_project_cwd TEXT,
+  voice_confirm_mode INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS workspace_sessions (
@@ -44,6 +45,32 @@ CREATE TABLE IF NOT EXISTS task_history (
   dangerous INTEGER NOT NULL DEFAULT 0,
   created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS project_preferences (
+  chat_id INTEGER NOT NULL,
+  project_path TEXT NOT NULL,
+  project_name TEXT NOT NULL,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  last_used_at REAL,
+  PRIMARY KEY (chat_id, project_path)
+);
+
+CREATE TABLE IF NOT EXISTS thread_favorites (
+  chat_id INTEGER NOT NULL,
+  session_id TEXT NOT NULL,
+  thread_name TEXT NOT NULL,
+  thread_cwd TEXT NOT NULL,
+  created_at REAL NOT NULL,
+  PRIMARY KEY (chat_id, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS pending_voice (
+  chat_id INTEGER PRIMARY KEY,
+  pending_id TEXT NOT NULL,
+  transcript TEXT NOT NULL,
+  local_path TEXT NOT NULL,
+  created_at REAL NOT NULL
+);
 """
 
 
@@ -59,6 +86,7 @@ class ChatSettings:
     active_thread_cwd: Path | None = None
     active_project_name: str | None = None
     active_project_cwd: Path | None = None
+    voice_confirm_mode: bool = False
 
 
 class StateStore:
@@ -83,6 +111,7 @@ class StateStore:
             "active_thread_cwd": "TEXT",
             "active_project_name": "TEXT",
             "active_project_cwd": "TEXT",
+            "voice_confirm_mode": "INTEGER NOT NULL DEFAULT 0",
         }
         for column_name, column_type in required_columns.items():
             if column_name not in existing_columns:
@@ -126,7 +155,8 @@ class StateStore:
                   active_thread_name,
                   active_thread_cwd,
                   active_project_name,
-                  active_project_cwd
+                  active_project_cwd,
+                  voice_confirm_mode
                 FROM chat_settings
                 WHERE chat_id = ?
                 """,
@@ -152,9 +182,10 @@ class StateStore:
                       active_thread_name,
                       active_thread_cwd,
                       active_project_name,
-                      active_project_cwd
+                      active_project_cwd,
+                      voice_confirm_mode
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         settings.chat_id,
@@ -167,6 +198,7 @@ class StateStore:
                         str(settings.active_thread_cwd) if settings.active_thread_cwd else None,
                         settings.active_project_name,
                         str(settings.active_project_cwd) if settings.active_project_cwd else None,
+                        int(settings.voice_confirm_mode),
                     ),
                 )
                 return settings
@@ -181,6 +213,7 @@ class StateStore:
                 active_thread_cwd=Path(row["active_thread_cwd"]).resolve() if row["active_thread_cwd"] else None,
                 active_project_name=row["active_project_name"],
                 active_project_cwd=Path(row["active_project_cwd"]).resolve() if row["active_project_cwd"] else None,
+                voice_confirm_mode=bool(row["voice_confirm_mode"]),
             )
 
     def update_chat_settings(self, settings: ChatSettings) -> None:
@@ -197,9 +230,10 @@ class StateStore:
                   active_thread_name,
                   active_thread_cwd,
                   active_project_name,
-                  active_project_cwd
+                  active_project_cwd,
+                  voice_confirm_mode
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
                   workspace_name=excluded.workspace_name,
                   model=excluded.model,
@@ -209,7 +243,8 @@ class StateStore:
                   active_thread_name=excluded.active_thread_name,
                   active_thread_cwd=excluded.active_thread_cwd,
                   active_project_name=excluded.active_project_name,
-                  active_project_cwd=excluded.active_project_cwd
+                  active_project_cwd=excluded.active_project_cwd,
+                  voice_confirm_mode=excluded.voice_confirm_mode
                 """,
                 (
                     settings.chat_id,
@@ -222,6 +257,7 @@ class StateStore:
                     str(settings.active_thread_cwd) if settings.active_thread_cwd else None,
                     settings.active_project_name,
                     str(settings.active_project_cwd) if settings.active_project_cwd else None,
+                    int(settings.voice_confirm_mode),
                 ),
             )
 
@@ -282,3 +318,133 @@ class StateStore:
                 """,
                 (chat_id, workspace_name, prompt, status, int(dangerous), time.time()),
             )
+
+    def record_project_usage(self, chat_id: int, project_path: str | Path, project_name: str) -> None:
+        path = str(Path(project_path).expanduser().resolve())
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO project_preferences (chat_id, project_path, project_name, favorite, last_used_at)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT(chat_id, project_path) DO UPDATE SET
+                  project_name=excluded.project_name,
+                  last_used_at=excluded.last_used_at
+                """,
+                (chat_id, path, project_name, time.time()),
+            )
+
+    def set_project_favorite(self, chat_id: int, project_path: str | Path, project_name: str, favorite: bool) -> None:
+        path = str(Path(project_path).expanduser().resolve())
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO project_preferences (chat_id, project_path, project_name, favorite, last_used_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, project_path) DO UPDATE SET
+                  project_name=excluded.project_name,
+                  favorite=excluded.favorite
+                """,
+                (chat_id, path, project_name, int(favorite), time.time()),
+            )
+
+    def project_preferences(self, chat_id: int) -> dict[str, dict[str, float | int | str | None]]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT project_path, project_name, favorite, last_used_at
+                FROM project_preferences
+                WHERE chat_id = ?
+                """,
+                (chat_id,),
+            ).fetchall()
+        return {
+            row["project_path"]: {
+                "name": row["project_name"],
+                "favorite": int(row["favorite"]),
+                "last_used_at": row["last_used_at"],
+            }
+            for row in rows
+        }
+
+    def set_thread_favorite(
+        self,
+        chat_id: int,
+        *,
+        session_id: str,
+        thread_name: str,
+        thread_cwd: str | Path,
+        favorite: bool,
+    ) -> None:
+        with self._lock, self._connect() as connection:
+            if favorite:
+                connection.execute(
+                    """
+                    INSERT INTO thread_favorites (chat_id, session_id, thread_name, thread_cwd, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(chat_id, session_id) DO UPDATE SET
+                      thread_name=excluded.thread_name,
+                      thread_cwd=excluded.thread_cwd
+                    """,
+                    (chat_id, session_id, thread_name, str(Path(thread_cwd).expanduser().resolve()), time.time()),
+                )
+                return
+            connection.execute(
+                "DELETE FROM thread_favorites WHERE chat_id = ? AND session_id = ?",
+                (chat_id, session_id),
+            )
+
+    def thread_favorites(self, chat_id: int) -> set[str]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT session_id FROM thread_favorites WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchall()
+        return {row["session_id"] for row in rows}
+
+    def set_pending_voice(self, chat_id: int, pending_id: str, transcript: str, local_path: str | Path) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO pending_voice (chat_id, pending_id, transcript, local_path, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                  pending_id=excluded.pending_id,
+                  transcript=excluded.transcript,
+                  local_path=excluded.local_path,
+                  created_at=excluded.created_at
+                """,
+                (chat_id, pending_id, transcript, str(local_path), time.time()),
+            )
+
+    def get_pending_voice(self, chat_id: int, pending_id: str | None = None) -> sqlite3.Row | None:
+        with self._lock, self._connect() as connection:
+            if pending_id is None:
+                return connection.execute(
+                    "SELECT pending_id, transcript, local_path, created_at FROM pending_voice WHERE chat_id = ?",
+                    (chat_id,),
+                ).fetchone()
+            return connection.execute(
+                """
+                SELECT pending_id, transcript, local_path, created_at
+                FROM pending_voice
+                WHERE chat_id = ? AND pending_id = ?
+                """,
+                (chat_id, pending_id),
+            ).fetchone()
+
+    def clear_pending_voice(self, chat_id: int) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute("DELETE FROM pending_voice WHERE chat_id = ?", (chat_id,))
+
+    def recent_tasks(self, chat_id: int, *, limit: int = 10) -> list[sqlite3.Row]:
+        with self._lock, self._connect() as connection:
+            return connection.execute(
+                """
+                SELECT workspace_name, prompt, status, dangerous, created_at
+                FROM task_history
+                WHERE chat_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (chat_id, limit),
+            ).fetchall()

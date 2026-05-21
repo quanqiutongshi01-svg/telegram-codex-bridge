@@ -1,11 +1,11 @@
 ---
 name: telegram-codex-bridge
-description: Install, configure, diagnose, or remove a macOS Telegram bridge that keeps local Codex projects and conversations reachable through Telegram with text, images, file return, local Whisper voice transcription, per-Telegram model and reasoning overrides, launchd management, and project-aware session persistence.
+description: Install, configure, diagnose, release, or remove a macOS Telegram bridge that keeps local Codex projects and conversations reachable through Telegram with text, images, file return, local Whisper voice transcription, per-Telegram model and reasoning overrides, project/conversation search and favorites, task cards, logs, launchd management, and project-aware session persistence.
 ---
 
 # Telegram Codex Bridge
 
-Use this skill when the user wants Codex reachable from Telegram, wants to install or repair the local bridge service, or needs to adjust Telegram-only runtime settings such as model, reasoning effort, project/conversation selection, workspaces, or plan mode.
+Use this skill when the user wants Codex reachable from Telegram, wants to install or repair the local bridge service, create a release asset, or needs to adjust Telegram-only runtime settings such as model, reasoning effort, project/conversation selection, favorites, workspaces, voice confirmation, or plan mode.
 
 ## Workflow
 
@@ -13,7 +13,8 @@ Use this skill when the user wants Codex reachable from Telegram, wants to insta
 2. Use `scripts/install.py` to install or update the runtime in `~/.codex/telegram-bridge/`.
 3. Use `scripts/service_control.py start|stop|restart|status` when the user wants a simple on/off switch for the installed bridge.
 4. Use `scripts/doctor.py` to validate `codex`, `ffmpeg`, launchd, config, and Telegram connectivity.
-5. Use `scripts/uninstall.py` to stop and remove the service. Add `--purge` only if the user wants runtime state deleted.
+5. Use `scripts/release.py` to build or publish GitHub release assets.
+6. Use `scripts/uninstall.py` to stop and remove the service. Add `--purge` only if the user wants runtime state deleted.
 
 ## Guardrails
 
@@ -28,5 +29,6 @@ Use this skill when the user wants Codex reachable from Telegram, wants to insta
 - `scripts/service_control.py`: start, stop, restart, or inspect the launchd service.
 - `scripts/uninstall.py`: stop launchd and optionally purge runtime data.
 - `scripts/doctor.py`: health checks for binaries, config, runtime, and Telegram.
+- `scripts/release.py`: run checks, build a zip asset, and optionally publish a GitHub release.
 - `src/telegram_codex_bridge/`: bridge implementation.
 - `references/configuration.md`: config schema, commands, runtime layout.

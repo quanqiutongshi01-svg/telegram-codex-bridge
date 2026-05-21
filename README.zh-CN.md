@@ -19,6 +19,10 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - 仅对 Telegram 生效的模型和推理精度覆盖
 - 带按钮的 Telegram 控制面板
 - 像 Codex App 一样按“项目 -> 对话”切换新的 Telegram 对话和已有桌面端对话
+- 项目/对话搜索、收藏和最近使用排序
+- 任务卡片支持详情、取消、重新运行、风险提示和最近任务记录
+- 可选的语音转写确认模式，确认后再交给 Codex
+- 可直接在 Telegram 查看最近错误日志
 - 基于 macOS `launchd` 的后台常驻管理
 
 这个仓库同时也是一个 Codex skill，可以挂载到 `$CODEX_HOME/skills` 中使用。
@@ -91,18 +95,32 @@ python3 scripts/service_control.py status
 - `/menu`：打开控制面板
 - `/status`：查看当前状态
 - `/doctor`：运行快速自检
+- `/logs`：查看最近桥接器日志
+- `/tasks`：查看最近任务记录
 - `/projects`：查看从本机 Codex 历史中发现的项目
 - `/project <名称|路径|clear>`：切换项目，或清空项目选择
 - `/threads`：查看当前项目下的 Codex 对话
 - `/thread <name|id|clear>`：切换到已有对话，或清空当前对话绑定
+- `/search <关键词>`：搜索项目、路径和对话标题
+- `/favorite`：收藏或取消收藏当前项目/对话
 - `/workspaces`：项目选择的兼容命令
 - `/workspace <name>`：把已注册工作区切换为当前项目
 - `/model <id>`：从本地 Codex 模型目录中设置仅 Telegram 生效的模型
 - `/effort <level>`：设置当前模型支持的推理精度
 - `/plan <on|off>`：切换仅 Telegram 生效的计划模式
+- `/voiceconfirm <on|off>`：语音转写确认后再发送给 Codex
 - `/new`：在当前项目中新建一个 Telegram 对话
 - `/stop`：停止当前执行任务
 - `/help`：查看帮助
+
+## 发布包
+
+可以用脚本生成 release zip，也可以直接发布到 GitHub Release：
+
+```bash
+python3 scripts/release.py v0.1.1
+python3 scripts/release.py v0.1.1 --publish
+```
 
 ## 仓库结构
 

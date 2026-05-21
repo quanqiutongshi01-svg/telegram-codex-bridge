@@ -19,6 +19,10 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - Telegram-only model and reasoning overrides
 - Telegram control panel with buttons
 - Project-aware switching between new Telegram conversations and existing Codex Desktop conversations
+- Project/conversation search, favorites, and recent-project ordering
+- Task cards with details, cancel, rerun, risk labels, and recent task history
+- Optional voice transcription confirmation before sending to Codex
+- Telegram-accessible recent error logs
 - `launchd` service management on macOS
 
 This repository is also structured as a Codex skill, so it can be linked into `$CODEX_HOME/skills`.
@@ -91,18 +95,32 @@ python3 scripts/service_control.py status
 - `/menu`: open the control panel
 - `/status`: show current status
 - `/doctor`: run a quick self-check
+- `/logs`: show recent bridge logs
+- `/tasks`: show recent task history
 - `/projects`: list local Codex projects discovered from desktop session history
 - `/project <name|path|clear>`: switch project or clear project selection
 - `/threads`: list conversations under the current project
 - `/thread <name|id|clear>`: switch to a saved conversation or clear selection
+- `/search <query>`: search projects, paths, and conversation titles
+- `/favorite`: favorite or unfavorite the current project/conversation
 - `/workspaces`: compatibility alias for project selection
 - `/workspace <name>`: switch to a registered workspace as the current project
 - `/model <id>`: set the Telegram-only model from the local Codex model catalog
 - `/effort <level>`: set a reasoning effort supported by the selected model
 - `/plan <on|off>`: toggle Telegram-only plan mode
+- `/voiceconfirm <on|off>`: require confirmation before voice transcripts are submitted
 - `/new`: start a fresh Telegram conversation in the current project
 - `/stop`: stop the current running task
 - `/help`: show command help
+
+## Release Assets
+
+Build a release zip and optional GitHub release with:
+
+```bash
+python3 scripts/release.py v0.1.1
+python3 scripts/release.py v0.1.1 --publish
+```
 
 ## Repository Layout
 
