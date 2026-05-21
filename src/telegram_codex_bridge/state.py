@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS chat_settings (
   plan_mode INTEGER NOT NULL DEFAULT 0,
   active_session_id TEXT,
   active_thread_name TEXT,
-  active_thread_cwd TEXT
+  active_thread_cwd TEXT,
+  active_project_name TEXT,
+  active_project_cwd TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workspace_sessions (
@@ -55,6 +57,8 @@ class ChatSettings:
     active_session_id: str | None = None
     active_thread_name: str | None = None
     active_thread_cwd: Path | None = None
+    active_project_name: str | None = None
+    active_project_cwd: Path | None = None
 
 
 class StateStore:
@@ -77,6 +81,8 @@ class StateStore:
             "active_session_id": "TEXT",
             "active_thread_name": "TEXT",
             "active_thread_cwd": "TEXT",
+            "active_project_name": "TEXT",
+            "active_project_cwd": "TEXT",
         }
         for column_name, column_type in required_columns.items():
             if column_name not in existing_columns:
@@ -118,7 +124,9 @@ class StateStore:
                   plan_mode,
                   active_session_id,
                   active_thread_name,
-                  active_thread_cwd
+                  active_thread_cwd,
+                  active_project_name,
+                  active_project_cwd
                 FROM chat_settings
                 WHERE chat_id = ?
                 """,
@@ -142,9 +150,11 @@ class StateStore:
                       plan_mode,
                       active_session_id,
                       active_thread_name,
-                      active_thread_cwd
+                      active_thread_cwd,
+                      active_project_name,
+                      active_project_cwd
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         settings.chat_id,
@@ -155,6 +165,8 @@ class StateStore:
                         settings.active_session_id,
                         settings.active_thread_name,
                         str(settings.active_thread_cwd) if settings.active_thread_cwd else None,
+                        settings.active_project_name,
+                        str(settings.active_project_cwd) if settings.active_project_cwd else None,
                     ),
                 )
                 return settings
@@ -167,6 +179,8 @@ class StateStore:
                 active_session_id=row["active_session_id"],
                 active_thread_name=row["active_thread_name"],
                 active_thread_cwd=Path(row["active_thread_cwd"]).resolve() if row["active_thread_cwd"] else None,
+                active_project_name=row["active_project_name"],
+                active_project_cwd=Path(row["active_project_cwd"]).resolve() if row["active_project_cwd"] else None,
             )
 
     def update_chat_settings(self, settings: ChatSettings) -> None:
@@ -181,9 +195,11 @@ class StateStore:
                   plan_mode,
                   active_session_id,
                   active_thread_name,
-                  active_thread_cwd
+                  active_thread_cwd,
+                  active_project_name,
+                  active_project_cwd
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(chat_id) DO UPDATE SET
                   workspace_name=excluded.workspace_name,
                   model=excluded.model,
@@ -191,7 +207,9 @@ class StateStore:
                   plan_mode=excluded.plan_mode,
                   active_session_id=excluded.active_session_id,
                   active_thread_name=excluded.active_thread_name,
-                  active_thread_cwd=excluded.active_thread_cwd
+                  active_thread_cwd=excluded.active_thread_cwd,
+                  active_project_name=excluded.active_project_name,
+                  active_project_cwd=excluded.active_project_cwd
                 """,
                 (
                     settings.chat_id,
@@ -202,6 +220,8 @@ class StateStore:
                     settings.active_session_id,
                     settings.active_thread_name,
                     str(settings.active_thread_cwd) if settings.active_thread_cwd else None,
+                    settings.active_project_name,
+                    str(settings.active_project_cwd) if settings.active_project_cwd else None,
                 ),
             )
 

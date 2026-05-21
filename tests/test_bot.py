@@ -130,3 +130,53 @@ def test_normalize_effort_uses_selected_model_default(tmp_path) -> None:
     ]
 
     assert bridge._normalize_effort_for_model("gpt-custom", "xhigh") == "medium"
+
+
+def test_selecting_project_changes_execution_target_without_global_config(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "other-project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+    )
+
+    bridge._select_project(settings, project_path)
+    target = bridge._resolve_target(settings)
+
+    assert settings.workspace_name == "main"
+    assert settings.active_project_name == "other-project"
+    assert target.path == project_path
+    assert target.context_label == "other-project"
+
+
+def test_threads_keyboard_filters_by_selected_project(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+        active_project_name="project",
+        active_project_cwd=project_path,
+    )
+    bridge.session_catalog.list_threads = lambda **kwargs: [
+        type(
+            "Thread",
+            (),
+            {
+                "session_id": "session-1",
+                "display_name": "项目对话",
+            },
+        )()
+    ]
+
+    keyboard = bridge._threads_keyboard(settings)
+
+    assert keyboard.inline_keyboard[0][0].text == "项目对话"

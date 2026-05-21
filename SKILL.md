@@ -1,11 +1,11 @@
 ---
 name: telegram-codex-bridge
-description: Install, configure, diagnose, or remove a macOS Telegram bridge that keeps a local Codex session reachable through Telegram with text, images, file return, local Whisper voice transcription, per-Telegram model and reasoning overrides, launchd management, and workspace-aware session persistence.
+description: Install, configure, diagnose, or remove a macOS Telegram bridge that keeps local Codex projects and conversations reachable through Telegram with text, images, file return, local Whisper voice transcription, per-Telegram model and reasoning overrides, launchd management, and project-aware session persistence.
 ---
 
 # Telegram Codex Bridge
 
-Use this skill when the user wants Codex reachable from Telegram, wants to install or repair the local bridge service, or needs to adjust Telegram-only runtime settings such as model, reasoning effort, workspaces, or plan mode.
+Use this skill when the user wants Codex reachable from Telegram, wants to install or repair the local bridge service, or needs to adjust Telegram-only runtime settings such as model, reasoning effort, project/conversation selection, workspaces, or plan mode.
 
 ## Workflow
 

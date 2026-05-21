@@ -17,6 +17,14 @@ class SavedCodexThread:
         return self.thread_name or self.session_id
 
 
+@dataclass(slots=True)
+class SavedCodexProject:
+    name: str
+    path: Path
+    thread_count: int
+    updated_at: str
+
+
 class ThreadLookupError(LookupError):
     pass
 
@@ -34,14 +42,24 @@ class SessionCatalog:
         self.index_path = self.codex_home / "session_index.jsonl"
         self.sessions_root = self.codex_home / "sessions"
 
-    def list_threads(self, *, limit: int | None = 10) -> list[SavedCodexThread]:
+    def list_threads(
+        self,
+        *,
+        limit: int | None = 10,
+        project_cwd: str | Path | None = None,
+        include_metadata: bool = False,
+    ) -> list[SavedCodexThread]:
         if not self.index_path.exists():
             return []
+        project_path = Path(project_cwd).expanduser().resolve() if project_cwd else None
         by_session_id: dict[str, SavedCodexThread] = {}
         for raw_line in self.index_path.read_text().splitlines():
             if not raw_line.strip():
                 continue
-            payload = json.loads(raw_line)
+            try:
+                payload = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
             session_id = payload.get("id")
             if not session_id:
                 continue
@@ -54,9 +72,38 @@ class SessionCatalog:
             if current is None or candidate.updated_at >= current.updated_at:
                 by_session_id[session_id] = candidate
         threads = sorted(by_session_id.values(), key=lambda item: item.updated_at, reverse=True)
+        if project_path is not None or include_metadata:
+            threads = [self._attach_metadata(thread) for thread in threads]
+        if project_path is not None:
+            threads = [thread for thread in threads if thread.cwd == project_path]
         if limit is None:
             return threads
         return threads[:limit]
+
+    def list_projects(self, *, limit: int | None = 10) -> list[SavedCodexProject]:
+        grouped: dict[Path, SavedCodexProject] = {}
+        for thread in self.list_threads(limit=None, include_metadata=True):
+            if thread.cwd is None:
+                continue
+            current = grouped.get(thread.cwd)
+            if current is None:
+                grouped[thread.cwd] = SavedCodexProject(
+                    name=thread.cwd.name or str(thread.cwd),
+                    path=thread.cwd,
+                    thread_count=1,
+                    updated_at=thread.updated_at,
+                )
+                continue
+            grouped[thread.cwd] = SavedCodexProject(
+                name=current.name,
+                path=current.path,
+                thread_count=current.thread_count + 1,
+                updated_at=max(current.updated_at, thread.updated_at),
+            )
+        projects = sorted(grouped.values(), key=lambda item: item.updated_at, reverse=True)
+        if limit is None:
+            return projects
+        return projects[:limit]
 
     def resolve_thread(self, query: str) -> SavedCodexThread:
         normalized = query.strip()
@@ -103,7 +150,10 @@ class SessionCatalog:
             first_line = handle.readline().strip()
         if not first_line:
             return None
-        payload = json.loads(first_line)
+        try:
+            payload = json.loads(first_line)
+        except json.JSONDecodeError:
+            return None
         if payload.get("type") != "session_meta":
             return None
         cwd = payload.get("payload", {}).get("cwd")

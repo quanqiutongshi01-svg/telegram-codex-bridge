@@ -39,6 +39,8 @@ def test_state_store_persists_active_thread_context(tmp_path) -> None:
     settings.active_session_id = "session-7"
     settings.active_thread_name = "新媒体矩阵运行"
     settings.active_thread_cwd = tmp_path / "workspace"
+    settings.active_project_name = "workspace"
+    settings.active_project_cwd = tmp_path / "workspace"
     state.update_chat_settings(settings)
 
     loaded = state.get_chat_settings(
@@ -51,6 +53,8 @@ def test_state_store_persists_active_thread_context(tmp_path) -> None:
     assert loaded.active_session_id == "session-7"
     assert loaded.active_thread_name == "新媒体矩阵运行"
     assert loaded.active_thread_cwd == (tmp_path / "workspace").resolve()
+    assert loaded.active_project_name == "workspace"
+    assert loaded.active_project_cwd == (tmp_path / "workspace").resolve()
 
 
 def test_workspace_sessions_round_trip(tmp_path) -> None:

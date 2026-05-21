@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
+import hashlib
 import logging
 import mimetypes
 from pathlib import Path
@@ -31,8 +32,8 @@ from telegram.ext import (
 )
 
 from .codex import CodexEvent, CodexModelOption, CodexRunner, TaskInput
-from .config import BridgeConfig
-from .sessions import AmbiguousThreadError, SessionCatalog, ThreadLookupError
+from .config import BridgeConfig, WorkspaceConfig
+from .sessions import AmbiguousThreadError, SavedCodexProject, SessionCatalog, ThreadLookupError
 from .state import ChatSettings, StateStore
 from .transcribe import WhisperTranscriber
 
@@ -102,6 +103,7 @@ class TelegramCodexBridge:
         self.pending_approvals: dict[str, QueuedTask] = {}
         self.workers: dict[str, WorkspaceWorker] = {}
         self._model_options_cache: list[CodexModelOption] | None = None
+        self._project_tokens: dict[str, Path] = {}
         for workspace in config.workspaces:
             self._ensure_worker(workspace.name, workspace.path)
 
@@ -136,14 +138,16 @@ class TelegramCodexBridge:
             BotCommand("menu", "打开控制面板"),
             BotCommand("status", "查看当前状态"),
             BotCommand("doctor", "查看桥接器自检"),
-            BotCommand("threads", "查看最近线程"),
-            BotCommand("thread", "切换到指定线程"),
-            BotCommand("workspaces", "查看工作区"),
-            BotCommand("workspace", "切换工作区"),
+            BotCommand("projects", "查看 Codex 项目"),
+            BotCommand("project", "切换 Codex 项目"),
+            BotCommand("threads", "查看当前项目的对话"),
+            BotCommand("thread", "切换到指定对话"),
+            BotCommand("workspaces", "查看项目"),
+            BotCommand("workspace", "切换项目"),
             BotCommand("model", "查看或切换模型"),
             BotCommand("effort", "查看或切换推理精度"),
             BotCommand("plan", "查看或切换计划模式"),
-            BotCommand("new", "新建一个 Telegram 线程"),
+            BotCommand("new", "新建一个 Telegram 对话"),
             BotCommand("stop", "停止当前任务"),
             BotCommand("help", "查看帮助"),
         ]
@@ -156,6 +160,8 @@ class TelegramCodexBridge:
         application.add_handler(CommandHandler("menu", self.menu_command))
         application.add_handler(CommandHandler("status", self.status_command))
         application.add_handler(CommandHandler("doctor", self.doctor_command))
+        application.add_handler(CommandHandler("projects", self.projects_command))
+        application.add_handler(CommandHandler("project", self.project_command))
         application.add_handler(CommandHandler("workspaces", self.workspaces_command))
         application.add_handler(CommandHandler("workspace", self.workspace_command))
         application.add_handler(CommandHandler("threads", self.threads_command))
@@ -219,6 +225,64 @@ class TelegramCodexBridge:
     def _worker_key(self, path: Path) -> str:
         return str(path.expanduser().resolve())
 
+    def _workspace_for_path(self, path: Path) -> WorkspaceConfig | None:
+        resolved_path = path.expanduser().resolve()
+        for workspace in self.config.workspaces:
+            if workspace.path == resolved_path:
+                return workspace
+        return None
+
+    def _project_display_name(self, path: Path) -> str:
+        workspace = self._workspace_for_path(path)
+        if workspace is not None:
+            return workspace.name
+        return path.name or str(path)
+
+    def _selected_project_path(self, settings: ChatSettings) -> Path:
+        if settings.active_project_cwd:
+            return settings.active_project_cwd
+        if settings.active_thread_cwd:
+            return settings.active_thread_cwd
+        return self.config.ensure_workspace(settings.workspace_name).path
+
+    def _project_token(self, path: Path) -> str:
+        resolved_path = path.expanduser().resolve()
+        token = hashlib.sha1(str(resolved_path).encode("utf-8")).hexdigest()[:12]
+        self._project_tokens[token] = resolved_path
+        return token
+
+    def _resolve_project_token(self, token: str) -> Path | None:
+        if token in self._project_tokens:
+            return self._project_tokens[token]
+        for project in self._available_projects(limit=None):
+            candidate_token = hashlib.sha1(str(project.path).encode("utf-8")).hexdigest()[:12]
+            if candidate_token == token:
+                self._project_tokens[token] = project.path
+                return project.path
+        return None
+
+    def _available_projects(self, *, limit: int | None = 10) -> list[SavedCodexProject]:
+        by_path: dict[Path, SavedCodexProject] = {}
+        for workspace in self.config.workspaces:
+            by_path[workspace.path] = SavedCodexProject(
+                name=workspace.name,
+                path=workspace.path,
+                thread_count=0,
+                updated_at="",
+            )
+        for project in self.session_catalog.list_projects(limit=None):
+            workspace = self._workspace_for_path(project.path)
+            by_path[project.path] = SavedCodexProject(
+                name=workspace.name if workspace is not None else project.name,
+                path=project.path,
+                thread_count=project.thread_count,
+                updated_at=project.updated_at,
+            )
+        projects = sorted(by_path.values(), key=lambda item: (item.updated_at, item.name), reverse=True)
+        if limit is None:
+            return projects
+        return projects[:limit]
+
     def _ensure_worker(self, name: str, path: Path) -> WorkspaceWorker:
         resolved_path = path.expanduser().resolve()
         key = self._worker_key(resolved_path)
@@ -248,6 +312,17 @@ class TelegramCodexBridge:
                 worker_key=self._worker_key(path),
                 context_label=context_label,
             )
+        if settings.active_project_cwd:
+            path = settings.active_project_cwd
+            context_label = settings.active_project_name or self._project_display_name(path)
+            return ResolvedChatTarget(
+                workspace=settings.workspace_name,
+                path=path,
+                session_id=settings.active_session_id,
+                thread_name=settings.active_thread_name,
+                worker_key=self._worker_key(path),
+                context_label=context_label,
+            )
         context_label = settings.active_thread_name or settings.workspace_name
         return ResolvedChatTarget(
             workspace=settings.workspace_name,
@@ -258,28 +333,57 @@ class TelegramCodexBridge:
             context_label=context_label,
         )
 
+    def _current_project_summary(self, settings: ChatSettings) -> str:
+        path = self._selected_project_path(settings)
+        name = settings.active_project_name or self._project_display_name(path)
+        return f"{name}\n项目路径：{path}"
+
     def _current_thread_summary(self, settings: ChatSettings) -> str:
         if settings.active_thread_name:
             return settings.active_thread_name
         if settings.active_session_id:
-            return f"Telegram 会话 {settings.active_session_id[:8]}"
-        return "新的 Telegram 线程"
+            return f"Telegram 对话 {settings.active_session_id[:8]}"
+        return "新的 Telegram 对话"
 
-    def _threads_keyboard(self, current_session_id: str | None) -> InlineKeyboardMarkup | None:
-        recent_threads = self.session_catalog.list_threads(limit=5)
+    def _threads_keyboard(self, settings: ChatSettings) -> InlineKeyboardMarkup | None:
+        recent_threads = self.session_catalog.list_threads(
+            limit=6,
+            project_cwd=self._selected_project_path(settings),
+            include_metadata=True,
+        )
         if not recent_threads:
-            return None
+            return InlineKeyboardMarkup([[InlineKeyboardButton("切换项目", callback_data="menu:projects")]])
         buttons = [
             [
                 InlineKeyboardButton(
-                    ("* " if thread.session_id == current_session_id else "") + thread.display_name[:48],
+                    ("* " if thread.session_id == settings.active_session_id else "") + thread.display_name[:48],
                     callback_data=f"thread:{thread.session_id}",
                 )
             ]
             for thread in recent_threads
         ]
-        buttons.append([InlineKeyboardButton("清空选择", callback_data="thread:clear")])
+        buttons.append(
+            [
+                InlineKeyboardButton("新对话", callback_data="menu:new"),
+                InlineKeyboardButton("清空对话", callback_data="thread:clear"),
+            ]
+        )
+        buttons.append([InlineKeyboardButton("切换项目", callback_data="menu:projects")])
         return InlineKeyboardMarkup(buttons)
+
+    def _projects_keyboard(self, settings: ChatSettings) -> InlineKeyboardMarkup:
+        current_path = self._selected_project_path(settings)
+        rows = []
+        for project in self._available_projects(limit=8):
+            token = self._project_token(project.path)
+            label = project.name
+            if project.thread_count:
+                label = f"{label} ({project.thread_count} 个对话)"
+            if project.path == current_path:
+                label = f"* {label}"
+            rows.append([InlineKeyboardButton(label[:60], callback_data=f"project:{token}")])
+        rows.append([InlineKeyboardButton("清空项目选择", callback_data="project:clear")])
+        return InlineKeyboardMarkup(rows)
 
     def _menu_keyboard(self) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
@@ -289,8 +393,8 @@ class TelegramCodexBridge:
                     InlineKeyboardButton("自检", callback_data="menu:doctor"),
                 ],
                 [
-                    InlineKeyboardButton("线程", callback_data="menu:threads"),
-                    InlineKeyboardButton("工作区", callback_data="menu:workspaces"),
+                    InlineKeyboardButton("项目", callback_data="menu:projects"),
+                    InlineKeyboardButton("对话", callback_data="menu:threads"),
                 ],
                 [
                     InlineKeyboardButton("模型", callback_data="menu:model"),
@@ -298,7 +402,7 @@ class TelegramCodexBridge:
                 ],
                 [
                     InlineKeyboardButton("计划模式", callback_data="menu:plan"),
-                    InlineKeyboardButton("新线程", callback_data="menu:new"),
+                    InlineKeyboardButton("新对话", callback_data="menu:new"),
                 ],
                 [InlineKeyboardButton("停止", callback_data="menu:stop")],
             ]
@@ -353,8 +457,9 @@ class TelegramCodexBridge:
         target = self._resolve_target(settings)
         worker = self._ensure_worker(target.context_label, target.path)
         return (
+            f"当前项目：{settings.active_project_name or self._project_display_name(self._selected_project_path(settings))}\n"
+            f"当前对话：{self._current_thread_summary(settings)}\n"
             f"工作区配置：{settings.workspace_name}\n"
-            f"当前线程：{self._current_thread_summary(settings)}\n"
             f"执行目录：{target.path}\n"
             f"模型：{settings.model}\n"
             f"推理精度：{settings.reasoning_effort}\n"
@@ -369,6 +474,7 @@ class TelegramCodexBridge:
             ("桥接服务", True, "bot 轮询中"),
             ("codex", self._binary_available(self.config.codex_binary), self.config.codex_binary),
             ("ffmpeg", self._binary_available(self.config.ffmpeg_binary), self.config.ffmpeg_binary),
+            ("当前项目", target.path.exists(), str(target.path)),
             ("执行目录", target.path.exists(), str(target.path)),
             ("状态数据库", self.config.state_db_path.exists(), str(self.config.state_db_path)),
             ("会话索引", self.session_catalog.index_path.exists(), str(self.session_catalog.index_path)),
@@ -378,11 +484,33 @@ class TelegramCodexBridge:
             lines.append(f"- {'正常' if ok else '异常'} {label}：{detail}")
         return "\n".join(lines)
 
+    def _projects_text(self, settings: ChatSettings) -> str:
+        projects = self._available_projects(limit=8)
+        if not projects:
+            return "这台 Mac 上暂时还没有找到可选 Codex 项目。"
+        current_path = self._selected_project_path(settings)
+        lines = ["可选 Codex 项目："]
+        for project in projects:
+            prefix = "* " if project.path == current_path else "- "
+            count = f"，{project.thread_count} 个对话" if project.thread_count else ""
+            lines.append(f"{prefix}{project.name}{count}\n  {project.path}")
+        lines.append("")
+        lines.append("选择项目后，“对话”按钮只会显示这个项目下的本地 Codex 对话。")
+        return "\n".join(lines)
+
     def _threads_text(self, settings: ChatSettings) -> str:
-        recent_threads = self.session_catalog.list_threads(limit=8)
+        project_path = self._selected_project_path(settings)
+        recent_threads = self.session_catalog.list_threads(limit=8, project_cwd=project_path, include_metadata=True)
         if not recent_threads:
-            return "这台 Mac 上暂时还没有找到本地 Codex 线程。"
-        lines = ["最近的 Codex 线程："]
+            return (
+                f"当前项目还没有找到本地 Codex 对话。\n"
+                f"项目：{settings.active_project_name or self._project_display_name(project_path)}\n"
+                f"路径：{project_path}"
+            )
+        lines = [
+            "当前项目下的 Codex 对话：",
+            f"项目：{settings.active_project_name or self._project_display_name(project_path)}",
+        ]
         for thread in recent_threads:
             prefix = "* " if thread.session_id == settings.active_session_id else "- "
             lines.append(f"{prefix}{thread.display_name} [{thread.session_id[:8]}]")
@@ -433,6 +561,43 @@ class TelegramCodexBridge:
         if model and model.default_reasoning_effort in choices:
             return model.default_reasoning_effort
         return choices[0]
+
+    def _select_project(self, settings: ChatSettings, path: Path) -> None:
+        resolved_path = path.expanduser().resolve()
+        workspace = self._workspace_for_path(resolved_path)
+        if workspace is not None:
+            settings.workspace_name = workspace.name
+        settings.active_project_name = workspace.name if workspace is not None else self._project_display_name(resolved_path)
+        settings.active_project_cwd = resolved_path
+        settings.active_session_id = None
+        settings.active_thread_name = None
+        settings.active_thread_cwd = None
+
+    def _clear_project_selection(self, settings: ChatSettings) -> None:
+        settings.workspace_name = self.config.default_workspace.name
+        settings.active_project_name = None
+        settings.active_project_cwd = None
+        settings.active_session_id = None
+        settings.active_thread_name = None
+        settings.active_thread_cwd = None
+
+    def _resolve_project_query(self, query: str) -> SavedCodexProject | None:
+        normalized = query.strip()
+        if not normalized:
+            return None
+        projects = self._available_projects(limit=None)
+        for project in projects:
+            if project.name == normalized or str(project.path) == normalized:
+                return project
+        lowered = normalized.casefold()
+        matches = [
+            project
+            for project in projects
+            if lowered in project.name.casefold() or lowered in str(project.path).casefold()
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def _source_label(self, source_description: str) -> str:
         labels = {
@@ -508,6 +673,20 @@ class TelegramCodexBridge:
             )
             job.status_message_id = message.message_id
 
+    async def _edit_callback_message(
+        self,
+        query,
+        text: str,
+        *,
+        reply_markup: InlineKeyboardMarkup | None = None,
+    ) -> None:
+        try:
+            await query.edit_message_text(text, reply_markup=reply_markup)
+        except BadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+            raise
+
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
             return
@@ -518,11 +697,13 @@ class TelegramCodexBridge:
             "/model [模型ID] - 查看或切换仅 Telegram 生效的模型\n"
             "/effort [精度] - 查看或切换当前模型支持的推理精度\n"
             "/plan [on|off] - 查看或切换仅 Telegram 生效的计划模式\n"
-            "/workspaces - 查看已注册的工作区\n"
-            "/workspace [名称] - 切换当前工作区\n"
-            "/threads - 查看这台 Mac 上最近的 Codex 线程\n"
-            "/thread [名称|ID|clear] - 切换到已有线程，或清空当前线程绑定\n"
-            "/new - 新建一个 Telegram 线程\n"
+            "/projects - 查看这台 Mac 上的 Codex 项目\n"
+            "/project [名称|路径片段|clear] - 切换项目，或清空项目选择\n"
+            "/threads - 查看当前项目下的 Codex 对话\n"
+            "/thread [名称|ID|clear] - 切换到已有对话，或清空当前对话绑定\n"
+            "/workspaces - 查看已注册工作区（兼容命令）\n"
+            "/workspace [名称] - 切换已注册工作区（兼容命令）\n"
+            "/new - 在当前项目中新建一个 Telegram 对话\n"
             "/stop - 停止当前正在执行的任务"
         )
         await update.effective_message.reply_text(text)
@@ -554,14 +735,52 @@ class TelegramCodexBridge:
             reply_markup=self._menu_keyboard(),
         )
 
+    async def projects_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._ensure_allowed(update):
+            return
+        settings = self._chat_settings(update.effective_chat.id)
+        await update.effective_message.reply_text(
+            self._projects_text(settings),
+            reply_markup=self._projects_keyboard(settings),
+        )
+
+    async def project_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self._ensure_allowed(update):
+            return
+        settings = self._chat_settings(update.effective_chat.id)
+        if not context.args:
+            await update.effective_message.reply_text(
+                f"当前项目：{self._current_project_summary(settings)}",
+                reply_markup=self._projects_keyboard(settings),
+            )
+            return
+        query = " ".join(context.args).strip()
+        if query.lower() in {"clear", "none", "default"}:
+            self._clear_project_selection(settings)
+            self.state.update_chat_settings(settings)
+            await update.effective_message.reply_text("已清空项目选择，回到默认工作区。")
+            return
+        project = self._resolve_project_query(query)
+        if project is None:
+            await update.effective_message.reply_text("没有找到匹配的 Codex 项目。请用 /projects 查看可选项目。")
+            return
+        if not project.path.exists():
+            await update.effective_message.reply_text(f"找到了这个项目，但路径不存在：{project.path}")
+            return
+        self._select_project(settings, project.path)
+        self.state.update_chat_settings(settings)
+        self._ensure_worker(settings.active_project_name or project.name, project.path)
+        await update.effective_message.reply_text(
+            f"已切换到项目：{settings.active_project_name}\n路径：{project.path}\n现在可以点“对话”选择这个项目里的历史对话。"
+        )
+
     async def workspaces_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
             return
         settings = self._chat_settings(update.effective_chat.id)
-        names = ", ".join(workspace.name for workspace in self.config.workspaces)
         await update.effective_message.reply_text(
-            f"已注册工作区：{names}",
-            reply_markup=self._workspace_keyboard(settings.workspace_name),
+            self._projects_text(settings),
+            reply_markup=self._projects_keyboard(settings),
         )
 
     async def workspace_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -570,8 +789,8 @@ class TelegramCodexBridge:
         settings = self._chat_settings(update.effective_chat.id)
         if not context.args:
             await update.effective_message.reply_text(
-                f"当前工作区：{settings.workspace_name}",
-                reply_markup=self._workspace_keyboard(settings.workspace_name),
+                f"当前项目：{self._current_project_summary(settings)}",
+                reply_markup=self._projects_keyboard(settings),
             )
             return
         target = context.args[0]
@@ -580,12 +799,9 @@ class TelegramCodexBridge:
         except KeyError:
             await update.effective_message.reply_text(f"未知工作区：{target}")
             return
-        settings.workspace_name = workspace.name
-        settings.active_session_id = None
-        settings.active_thread_name = None
-        settings.active_thread_cwd = None
+        self._select_project(settings, workspace.path)
         self.state.update_chat_settings(settings)
-        await update.effective_message.reply_text(f"已切换到工作区 {target}，并清空当前线程绑定。")
+        await update.effective_message.reply_text(f"已切换到项目 {target}，并清空当前对话绑定。")
 
     async def threads_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -594,7 +810,7 @@ class TelegramCodexBridge:
         text = self._threads_text(settings)
         await update.effective_message.reply_text(
             text,
-            reply_markup=self._threads_keyboard(settings.active_session_id),
+            reply_markup=self._threads_keyboard(settings),
         )
 
     async def thread_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -602,9 +818,9 @@ class TelegramCodexBridge:
             return
         settings = self._chat_settings(update.effective_chat.id)
         if not context.args:
-            keyboard = self._threads_keyboard(settings.active_session_id)
+            keyboard = self._threads_keyboard(settings)
             await update.effective_message.reply_text(
-                f"当前线程：{self._current_thread_summary(settings)}",
+                f"当前对话：{self._current_thread_summary(settings)}",
                 reply_markup=keyboard,
             )
             return
@@ -614,29 +830,34 @@ class TelegramCodexBridge:
             settings.active_thread_name = None
             settings.active_thread_cwd = None
             self.state.update_chat_settings(settings)
-            await update.effective_message.reply_text("已清空线程绑定，下一条消息会从新的 Telegram 线程开始。")
+            await update.effective_message.reply_text("已清空对话绑定，下一条消息会在当前项目里开始一个新对话。")
             return
         try:
             thread = self.session_catalog.resolve_thread(query)
         except AmbiguousThreadError as exc:
             choices = "\n".join(f"- {item.display_name} [{item.session_id[:8]}]" for item in exc.matches)
-            await update.effective_message.reply_text(f"匹配到多个线程：\n{choices}")
+            await update.effective_message.reply_text(f"匹配到多个对话：\n{choices}")
             return
         except ThreadLookupError:
-            await update.effective_message.reply_text(f"没有找到匹配的本地 Codex 线程：{query}")
+            await update.effective_message.reply_text(f"没有找到匹配的本地 Codex 对话：{query}")
             return
         if thread.cwd is None:
-            await update.effective_message.reply_text("找到了这个线程，但无法读取它原始的工作目录。")
+            await update.effective_message.reply_text("找到了这个对话，但无法读取它原始的工作目录。")
             return
         if not thread.cwd.exists():
-            await update.effective_message.reply_text(f"找到了这个线程，但它的工作目录已经不存在：{thread.cwd}")
+            await update.effective_message.reply_text(f"找到了这个对话，但它的工作目录已经不存在：{thread.cwd}")
             return
         settings.active_session_id = thread.session_id
         settings.active_thread_name = thread.display_name
         settings.active_thread_cwd = thread.cwd
+        settings.active_project_name = self._project_display_name(thread.cwd)
+        settings.active_project_cwd = thread.cwd
+        workspace = self._workspace_for_path(thread.cwd)
+        if workspace is not None:
+            settings.workspace_name = workspace.name
         self.state.update_chat_settings(settings)
         self._ensure_worker(thread.display_name, thread.cwd)
-        await update.effective_message.reply_text(f"已切换到线程“{thread.display_name}”。\n执行目录：{thread.cwd}")
+        await update.effective_message.reply_text(f"已切换到对话“{thread.display_name}”。\n执行目录：{thread.cwd}")
 
     async def model_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -731,6 +952,8 @@ class TelegramCodexBridge:
             return None
         if latest.workspace_name != job.settings_snapshot.workspace_name:
             return None
+        if latest.active_project_cwd != job.settings_snapshot.active_project_cwd:
+            return None
         return latest.active_session_id
 
     async def new_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -742,7 +965,7 @@ class TelegramCodexBridge:
         settings.active_thread_cwd = None
         self.state.update_chat_settings(settings)
         self.state.set_session_id(settings.workspace_name, None)
-        await update.effective_message.reply_text(f"已清空工作区 {settings.workspace_name} 当前绑定的 Telegram 线程。")
+        await update.effective_message.reply_text("已新建对话。下一条消息会在当前项目里启动新的 Codex 会话。")
 
     async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -751,10 +974,10 @@ class TelegramCodexBridge:
         target = self._resolve_target(settings)
         worker = self._ensure_worker(target.context_label, target.path)
         if worker.active_process is None:
-            await update.effective_message.reply_text("当前 Telegram 线程没有正在运行的任务。")
+            await update.effective_message.reply_text("当前 Telegram 对话没有正在运行的任务。")
             return
         worker.active_process.terminate()
-        await update.effective_message.reply_text("已向当前 Telegram 线程发送停止信号。")
+        await update.effective_message.reply_text("已向当前 Telegram 对话发送停止信号。")
 
     async def callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -768,40 +991,45 @@ class TelegramCodexBridge:
         settings = self._chat_settings(update.effective_chat.id)
         if action == "menu":
             if value == "main":
-                await query.edit_message_text(self._status_text(settings), reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, self._status_text(settings), reply_markup=self._menu_keyboard())
                 return
             if value == "status":
-                await query.edit_message_text(self._status_text(settings), reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, self._status_text(settings), reply_markup=self._menu_keyboard())
                 return
             if value == "doctor":
-                await query.edit_message_text(self._doctor_text(settings), reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, self._doctor_text(settings), reply_markup=self._menu_keyboard())
                 return
             if value == "threads":
-                await query.edit_message_text(
+                await self._edit_callback_message(
+                    query,
                     self._threads_text(settings),
-                    reply_markup=self._with_back_button(self._threads_keyboard(settings.active_session_id)),
+                    reply_markup=self._with_back_button(self._threads_keyboard(settings)),
                 )
                 return
-            if value == "workspaces":
-                await query.edit_message_text(
-                    f"已注册工作区：{', '.join(workspace.name for workspace in self.config.workspaces)}",
-                    reply_markup=self._with_back_button(self._workspace_keyboard(settings.workspace_name)),
+            if value in {"projects", "workspaces"}:
+                await self._edit_callback_message(
+                    query,
+                    self._projects_text(settings),
+                    reply_markup=self._with_back_button(self._projects_keyboard(settings)),
                 )
                 return
             if value == "model":
-                await query.edit_message_text(
+                await self._edit_callback_message(
+                    query,
                     f"当前仅 Telegram 生效的模型：{settings.model}",
                     reply_markup=self._with_back_button(self._model_keyboard(settings.model)),
                 )
                 return
             if value == "effort":
-                await query.edit_message_text(
+                await self._edit_callback_message(
+                    query,
                     f"当前仅 Telegram 生效的推理精度：{settings.reasoning_effort}",
                     reply_markup=self._with_back_button(self._effort_keyboard(settings.reasoning_effort, settings.model)),
                 )
                 return
             if value == "plan":
-                await query.edit_message_text(
+                await self._edit_callback_message(
+                    query,
                     f"当前仅 Telegram 生效的计划模式：{'开启' if settings.plan_mode else '关闭'}",
                     reply_markup=self._with_back_button(self._plan_keyboard(settings.plan_mode)),
                 )
@@ -812,8 +1040,9 @@ class TelegramCodexBridge:
                 settings.active_thread_cwd = None
                 self.state.update_chat_settings(settings)
                 self.state.set_session_id(settings.workspace_name, None)
-                await query.edit_message_text(
-                    f"已清空工作区 {settings.workspace_name} 当前绑定的 Telegram 线程。",
+                await self._edit_callback_message(
+                    query,
+                    "已新建对话。下一条消息会在当前项目里启动新的 Codex 会话。",
                     reply_markup=self._menu_keyboard(),
                 )
                 return
@@ -821,24 +1050,44 @@ class TelegramCodexBridge:
                 target = self._resolve_target(settings)
                 worker = self._ensure_worker(target.context_label, target.path)
                 if worker.active_process is None:
-                    await query.edit_message_text("当前 Telegram 线程没有正在运行的任务。", reply_markup=self._menu_keyboard())
+                    await self._edit_callback_message(query, "当前 Telegram 对话没有正在运行的任务。", reply_markup=self._menu_keyboard())
                     return
                 worker.active_process.terminate()
-                await query.edit_message_text("已向当前 Telegram 线程发送停止信号。", reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, "已向当前 Telegram 对话发送停止信号。", reply_markup=self._menu_keyboard())
                 return
+        if action == "project":
+            if value == "clear":
+                self._clear_project_selection(settings)
+                self.state.update_chat_settings(settings)
+                await self._edit_callback_message(query, "已清空项目选择，回到默认工作区。", reply_markup=self._menu_keyboard())
+                return
+            path = self._resolve_project_token(value)
+            if path is None:
+                await self._edit_callback_message(query, "这个项目按钮已经过期，请重新打开项目列表。", reply_markup=self._menu_keyboard())
+                return
+            if not path.exists():
+                await self._edit_callback_message(query, f"这个项目路径不存在：{path}", reply_markup=self._menu_keyboard())
+                return
+            self._select_project(settings, path)
+            self.state.update_chat_settings(settings)
+            self._ensure_worker(settings.active_project_name or self._project_display_name(path), path)
+            await self._edit_callback_message(
+                query,
+                f"已切换到项目：{settings.active_project_name}\n路径：{path}\n现在可以选择这个项目下的对话。",
+                reply_markup=self._with_back_button(self._threads_keyboard(settings)),
+            )
+            return
         if action == "workspace":
             try:
-                self.config.ensure_workspace(value)
+                workspace = self.config.ensure_workspace(value)
             except KeyError:
                 return
-            settings.workspace_name = value
-            settings.active_session_id = None
-            settings.active_thread_name = None
-            settings.active_thread_cwd = None
+            self._select_project(settings, workspace.path)
             self.state.update_chat_settings(settings)
-            await query.edit_message_text(
-                f"已切换到工作区 {value}，并清空当前线程绑定。",
-                reply_markup=self._with_back_button(self._workspace_keyboard(value)),
+            await self._edit_callback_message(
+                query,
+                f"已切换到项目 {value}，并清空当前对话绑定。",
+                reply_markup=self._with_back_button(self._projects_keyboard(settings)),
             )
             return
         if action == "thread":
@@ -847,38 +1096,46 @@ class TelegramCodexBridge:
                 settings.active_thread_name = None
                 settings.active_thread_cwd = None
                 self.state.update_chat_settings(settings)
-                await query.edit_message_text("已清空当前线程绑定。", reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, "已清空当前对话绑定。", reply_markup=self._menu_keyboard())
                 return
             try:
                 thread = self.session_catalog.resolve_thread(value)
             except ThreadLookupError:
-                await query.edit_message_text("这个已保存的 Codex 线程现在不可用了。", reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, "这个已保存的 Codex 对话现在不可用了。", reply_markup=self._menu_keyboard())
                 return
             if thread.cwd is None or not thread.cwd.exists():
-                await query.edit_message_text(
-                    "这个已保存的 Codex 线程仍在，但它原始的工作目录不可用。",
+                await self._edit_callback_message(
+                    query,
+                    "这个已保存的 Codex 对话仍在，但它原始的工作目录不可用。",
                     reply_markup=self._menu_keyboard(),
                 )
                 return
             settings.active_session_id = thread.session_id
             settings.active_thread_name = thread.display_name
             settings.active_thread_cwd = thread.cwd
+            settings.active_project_name = self._project_display_name(thread.cwd)
+            settings.active_project_cwd = thread.cwd
+            workspace = self._workspace_for_path(thread.cwd)
+            if workspace is not None:
+                settings.workspace_name = workspace.name
             self.state.update_chat_settings(settings)
             self._ensure_worker(thread.display_name, thread.cwd)
-            await query.edit_message_text(
-                f"已切换到线程“{thread.display_name}”。\n执行目录：{thread.cwd}",
-                reply_markup=self._with_back_button(self._threads_keyboard(thread.session_id)),
+            await self._edit_callback_message(
+                query,
+                f"已切换到对话“{thread.display_name}”。\n执行目录：{thread.cwd}",
+                reply_markup=self._with_back_button(self._threads_keyboard(settings)),
             )
             return
         if action == "model":
             model = self._model_option(value)
             if model is None:
-                await query.edit_message_text("这个模型不在当前 Codex 模型目录里。", reply_markup=self._menu_keyboard())
+                await self._edit_callback_message(query, "这个模型不在当前 Codex 模型目录里。", reply_markup=self._menu_keyboard())
                 return
             settings.model = value
             settings.reasoning_effort = self._normalize_effort_for_model(value, settings.reasoning_effort)
             self.state.update_chat_settings(settings)
-            await query.edit_message_text(
+            await self._edit_callback_message(
+                query,
                 f"仅 Telegram 生效的模型已切换为 {value}\n推理精度：{settings.reasoning_effort}",
                 reply_markup=self._with_back_button(self._model_keyboard(value)),
             )
@@ -886,7 +1143,8 @@ class TelegramCodexBridge:
         if action == "effort" and value in self._effort_choices(settings.model):
             settings.reasoning_effort = value
             self.state.update_chat_settings(settings)
-            await query.edit_message_text(
+            await self._edit_callback_message(
+                query,
                 f"仅 Telegram 生效的推理精度已切换为 {value}",
                 reply_markup=self._with_back_button(self._effort_keyboard(value, settings.model)),
             )
@@ -894,7 +1152,8 @@ class TelegramCodexBridge:
         if action == "plan" and value in {"on", "off"}:
             settings.plan_mode = value == "on"
             self.state.update_chat_settings(settings)
-            await query.edit_message_text(
+            await self._edit_callback_message(
+                query,
                 f"仅 Telegram 生效的计划模式已切换为 {'开启' if settings.plan_mode else '关闭'}",
                 reply_markup=self._with_back_button(self._plan_keyboard(settings.plan_mode)),
             )

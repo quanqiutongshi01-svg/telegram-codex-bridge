@@ -18,7 +18,7 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - 本地 Whisper 语音转写
 - 仅对 Telegram 生效的模型和推理精度覆盖
 - 带按钮的 Telegram 控制面板
-- 在新的 Telegram 线程和已有 Codex Desktop 线程之间切换
+- 像 Codex App 一样按“项目 -> 对话”切换新的 Telegram 对话和已有桌面端对话
 - 基于 macOS `launchd` 的后台常驻管理
 
 这个仓库同时也是一个 Codex skill，可以挂载到 `$CODEX_HOME/skills` 中使用。
@@ -91,14 +91,16 @@ python3 scripts/service_control.py status
 - `/menu`：打开控制面板
 - `/status`：查看当前状态
 - `/doctor`：运行快速自检
-- `/threads`：查看最近的本地 Codex 线程
-- `/thread <name|id|clear>`：切换到已有线程，或清空当前线程绑定
-- `/workspaces`：查看工作区
-- `/workspace <name>`：切换工作区
+- `/projects`：查看从本机 Codex 历史中发现的项目
+- `/project <名称|路径|clear>`：切换项目，或清空项目选择
+- `/threads`：查看当前项目下的 Codex 对话
+- `/thread <name|id|clear>`：切换到已有对话，或清空当前对话绑定
+- `/workspaces`：项目选择的兼容命令
+- `/workspace <name>`：把已注册工作区切换为当前项目
 - `/model <id>`：从本地 Codex 模型目录中设置仅 Telegram 生效的模型
 - `/effort <level>`：设置当前模型支持的推理精度
 - `/plan <on|off>`：切换仅 Telegram 生效的计划模式
-- `/new`：新建一个 Telegram 线程
+- `/new`：在当前项目中新建一个 Telegram 对话
 - `/stop`：停止当前执行任务
 - `/help`：查看帮助
 
@@ -140,7 +142,7 @@ ln -sfn /path/to/telegram-codex-bridge ~/.codex/skills/telegram-codex-bridge
 
 ### 能不能从 Telegram 继续之前桌面端创建的线程？
 
-可以。先用 `/threads` 查看最近线程，再用 `/thread <名称|ID>` 绑定到对应线程。
+可以。先用 `/projects` 或“项目”按钮选项目，再用 `/threads` 或“对话”按钮选择这个项目里的桌面端历史对话。
 
 ### 如果语音转写失败怎么办？
 

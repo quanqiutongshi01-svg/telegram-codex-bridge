@@ -39,12 +39,14 @@ path = "/Users/your-name/projects/telegram-codex-bridge"
 - `/model [id]`: show or change the Telegram-only default model for this chat. Button choices come from `codex debug models`.
 - `/effort [level]`: show or change Telegram-only reasoning effort. Choices follow the selected model's supported levels.
 - `/plan [on|off]`: toggle bridge-managed planning mode for Telegram tasks.
-- `/workspaces`: list registered workspaces.
-- `/workspace [name]`: show or change the chat's active workspace.
-- `/threads`: list recent local Codex threads from this Mac.
-- `/thread [name|id|clear]`: attach Telegram to a desktop-created Codex thread or clear the current binding.
-- `/new`: clear the active workspace's persisted Codex session.
-- `/stop`: stop the current workspace task.
+- `/projects`: list local Codex projects discovered from desktop session metadata, plus configured workspaces.
+- `/project [name|path|clear]`: show, change, or clear the current project selection.
+- `/threads`: list recent local Codex conversations for the current project.
+- `/thread [name|id|clear]`: attach Telegram to a desktop-created Codex conversation or clear the current conversation binding.
+- `/workspaces`: compatibility alias for project selection.
+- `/workspace [name]`: switch a configured workspace as the current project.
+- `/new`: clear the current conversation while keeping the selected project.
+- `/stop`: stop the current project task.
 - `/help`: command summary.
 
 ## Media behavior
@@ -58,5 +60,5 @@ path = "/Users/your-name/projects/telegram-codex-bridge"
 ## Service notes
 
 - The bridge uses `codex exec --json` for new tasks and `codex exec resume --json` for follow-up messages.
-- Each workspace has a single FIFO queue and one persisted session id.
+- Each project execution path has a single FIFO queue. Selecting a project controls where new Telegram conversations start.
 - Telegram-only model and reasoning overrides are injected via CLI flags; global Codex defaults stay unchanged.

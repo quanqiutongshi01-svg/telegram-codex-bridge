@@ -18,7 +18,7 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - Local Whisper voice transcription
 - Telegram-only model and reasoning overrides
 - Telegram control panel with buttons
-- Switching between new Telegram threads and existing Codex Desktop threads
+- Project-aware switching between new Telegram conversations and existing Codex Desktop conversations
 - `launchd` service management on macOS
 
 This repository is also structured as a Codex skill, so it can be linked into `$CODEX_HOME/skills`.
@@ -91,14 +91,16 @@ python3 scripts/service_control.py status
 - `/menu`: open the control panel
 - `/status`: show current status
 - `/doctor`: run a quick self-check
-- `/threads`: list recent local Codex threads
-- `/thread <name|id|clear>`: switch to a saved thread or clear selection
-- `/workspaces`: list workspaces
-- `/workspace <name>`: switch workspace
+- `/projects`: list local Codex projects discovered from desktop session history
+- `/project <name|path|clear>`: switch project or clear project selection
+- `/threads`: list conversations under the current project
+- `/thread <name|id|clear>`: switch to a saved conversation or clear selection
+- `/workspaces`: compatibility alias for project selection
+- `/workspace <name>`: switch to a registered workspace as the current project
 - `/model <id>`: set the Telegram-only model from the local Codex model catalog
 - `/effort <level>`: set a reasoning effort supported by the selected model
 - `/plan <on|off>`: toggle Telegram-only plan mode
-- `/new`: start a fresh Telegram thread
+- `/new`: start a fresh Telegram conversation in the current project
 - `/stop`: stop the current running task
 - `/help`: show command help
 
@@ -140,7 +142,7 @@ That is intentional. Telegram-only model and reasoning overrides are isolated fr
 
 ### Can I continue an existing desktop thread from Telegram?
 
-Yes. Use `/threads` to list recent threads and `/thread <name|id>` to attach the chat to one of them.
+Yes. Use `/projects` or the **Project** button first, then use `/threads` or the **Conversation** button to attach Telegram to a saved desktop conversation in that project.
 
 ### What should I do if voice transcription fails?
 
