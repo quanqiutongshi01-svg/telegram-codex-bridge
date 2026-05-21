@@ -260,3 +260,31 @@ def test_project_overview_includes_threads_and_project_tasks(tmp_path) -> None:
     assert "项目概览：project" in text
     assert "项目对话" in text
     assert "继续完善项目" in text
+
+
+def test_project_overview_falls_back_to_legacy_task_rows(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "legacy-project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+        active_project_name="legacy-project",
+        active_project_cwd=project_path,
+    )
+    bridge.session_catalog.list_threads = lambda **kwargs: []
+    bridge.state.add_task(
+        chat_id=7,
+        workspace_name="legacy-project",
+        prompt="旧任务记录",
+        status="completed",
+        dangerous=False,
+    )
+
+    text = bridge._project_overview_text(settings)
+
+    assert "旧记录按名称匹配" in text
+    assert "旧任务记录" in text

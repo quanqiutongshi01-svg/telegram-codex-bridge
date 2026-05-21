@@ -262,6 +262,36 @@ class TelegramCodexBridge:
             return settings.active_thread_cwd
         return self.config.ensure_workspace(settings.workspace_name).path
 
+    def _paths_related(self, first: Path, second: Path) -> bool:
+        first = first.expanduser().resolve()
+        second = second.expanduser().resolve()
+        try:
+            first.relative_to(second)
+            return True
+        except ValueError:
+            pass
+        try:
+            second.relative_to(first)
+            return True
+        except ValueError:
+            return False
+
+    def _project_threads(self, project_path: Path, *, limit: int = 8) -> list:
+        exact_threads = self.session_catalog.list_threads(limit=limit, project_cwd=project_path, include_metadata=True)
+        seen = {thread.session_id for thread in exact_threads}
+        if len(exact_threads) >= limit:
+            return exact_threads[:limit]
+        related_threads = []
+        for thread in self.session_catalog.list_threads(limit=None, include_metadata=True):
+            if thread.session_id in seen or thread.cwd is None:
+                continue
+            if self._paths_related(project_path, thread.cwd):
+                related_threads.append(thread)
+                seen.add(thread.session_id)
+            if len(exact_threads) + len(related_threads) >= limit:
+                break
+        return (exact_threads + related_threads)[:limit]
+
     def _project_token(self, path: Path) -> str:
         resolved_path = path.expanduser().resolve()
         token = hashlib.sha1(str(resolved_path).encode("utf-8")).hexdigest()[:12]
@@ -371,11 +401,7 @@ class TelegramCodexBridge:
         return "新的 Telegram 对话"
 
     def _threads_keyboard(self, settings: ChatSettings) -> InlineKeyboardMarkup | None:
-        recent_threads = self.session_catalog.list_threads(
-            limit=6,
-            project_cwd=self._selected_project_path(settings),
-            include_metadata=True,
-        )
+        recent_threads = self._project_threads(self._selected_project_path(settings), limit=6)
         favorites = self.state.thread_favorites(settings.chat_id)
         if not recent_threads:
             return InlineKeyboardMarkup([[InlineKeyboardButton("切换项目", callback_data="menu:projects")]])
@@ -575,6 +601,29 @@ class TelegramCodexBridge:
             lines.append(f"- {row['status']}｜{row['workspace_name']}{danger}｜{prompt}")
         return "\n".join(lines)
 
+    def _project_task_rows(self, settings: ChatSettings, project_path: Path, *, limit: int = 5):
+        rows = self.state.recent_tasks(settings.chat_id, limit=limit, project_path=project_path)
+        if rows:
+            return "当前项目最近任务：", rows
+        candidate_names = {
+            settings.workspace_name,
+            settings.active_project_name or "",
+            settings.active_thread_name or "",
+            self._project_display_name(project_path),
+        }
+        candidate_names.discard("")
+        fallback_rows = [
+            row
+            for row in self.state.recent_tasks(settings.chat_id, limit=30)
+            if row["project_path"] is None and row["workspace_name"] in candidate_names
+        ][:limit]
+        if fallback_rows:
+            return "当前项目最近任务（旧记录按名称匹配）：", fallback_rows
+        global_rows = self.state.recent_tasks(settings.chat_id, limit=limit)
+        if global_rows:
+            return "最近 Telegram 任务（旧记录未绑定项目）：", global_rows
+        return "最近进展：", []
+
     def _project_git_summary(self, project_path: Path) -> str:
         try:
             root = subprocess.run(
@@ -609,8 +658,8 @@ class TelegramCodexBridge:
     def _project_overview_text(self, settings: ChatSettings) -> str:
         project_path = self._selected_project_path(settings)
         project_name = settings.active_project_name or self._project_display_name(project_path)
-        threads = self.session_catalog.list_threads(limit=5, project_cwd=project_path, include_metadata=True)
-        task_rows = self.state.recent_tasks(settings.chat_id, limit=5, project_path=project_path)
+        threads = self._project_threads(project_path, limit=5)
+        task_label, task_rows = self._project_task_rows(settings, project_path, limit=5)
         lines = [
             f"项目概览：{project_name}",
             f"路径：{project_path}",
@@ -625,7 +674,7 @@ class TelegramCodexBridge:
                 lines.append(f"{marker}{thread.display_name} [{thread.session_id[:8]}]")
         else:
             lines.append("- 这个项目还没有本地 Codex 对话记录。")
-        lines.extend(["", "最近进展："])
+        lines.extend(["", task_label])
         if task_rows:
             for row in task_rows:
                 prompt = str(row["prompt"]).replace("\n", " ")[:56]
@@ -664,7 +713,7 @@ class TelegramCodexBridge:
 
     def _threads_text(self, settings: ChatSettings) -> str:
         project_path = self._selected_project_path(settings)
-        recent_threads = self.session_catalog.list_threads(limit=8, project_cwd=project_path, include_metadata=True)
+        recent_threads = self._project_threads(project_path, limit=8)
         if not recent_threads:
             return (
                 f"当前项目还没有找到本地 Codex 对话。\n"
