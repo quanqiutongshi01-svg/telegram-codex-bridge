@@ -5,7 +5,7 @@ import pytest
 pytest.importorskip("telegram")
 
 from telegram_codex_bridge.bot import QueuedTask, TelegramCodexBridge, WorkspaceWorker
-from telegram_codex_bridge.codex import TaskInput
+from telegram_codex_bridge.codex import CodexModelOption, TaskInput
 from telegram_codex_bridge.config import BridgeConfig, WorkspaceConfig
 from telegram_codex_bridge.state import ChatSettings, StateStore
 
@@ -99,3 +99,34 @@ def test_detect_existing_paths_supports_spaces(tmp_path) -> None:
     paths = bridge._detect_existing_paths(f"已生成视频：{video_path}，可以回传。")
 
     assert paths == [video_path.resolve()]
+
+
+def test_model_options_use_codex_catalog(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    bridge.codex.list_models = lambda: [
+        CodexModelOption(
+            slug="gpt-5.5",
+            display_name="GPT-5.5",
+            default_reasoning_effort="medium",
+            supported_reasoning_efforts=("low", "medium", "high", "xhigh"),
+        )
+    ]
+
+    options = bridge._model_options()
+
+    assert [option.slug for option in options] == ["gpt-5.5"]
+    assert bridge._effort_choices("gpt-5.5") == ("low", "medium", "high", "xhigh")
+
+
+def test_normalize_effort_uses_selected_model_default(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    bridge.codex.list_models = lambda: [
+        CodexModelOption(
+            slug="gpt-custom",
+            display_name="Custom",
+            default_reasoning_effort="medium",
+            supported_reasoning_efforts=("medium", "high"),
+        )
+    ]
+
+    assert bridge._normalize_effort_for_model("gpt-custom", "xhigh") == "medium"

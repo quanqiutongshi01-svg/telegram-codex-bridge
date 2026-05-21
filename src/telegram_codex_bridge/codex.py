@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+import subprocess
 from typing import Awaitable, Callable
 
 
@@ -30,6 +31,14 @@ class TaskInput:
 class CodexEvent:
     kind: str
     payload: dict
+
+
+@dataclass(slots=True)
+class CodexModelOption:
+    slug: str
+    display_name: str
+    default_reasoning_effort: str
+    supported_reasoning_efforts: tuple[str, ...]
 
 
 def normalize_reasoning_effort(effort: str) -> str:
@@ -111,6 +120,36 @@ def build_command(binary: str, task: TaskInput, session_id: str | None) -> list[
 class CodexRunner:
     def __init__(self, binary: str):
         self.binary = binary
+
+    def list_models(self) -> list[CodexModelOption]:
+        result = subprocess.run(
+            [self.binary, "debug", "models"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        payload = json.loads(result.stdout)
+        models: list[CodexModelOption] = []
+        for item in payload.get("models", []):
+            slug = item.get("slug")
+            if not slug or item.get("visibility") != "list":
+                continue
+            efforts = tuple(
+                effort["effort"]
+                for effort in item.get("supported_reasoning_levels", [])
+                if effort.get("effort")
+            )
+            models.append(
+                CodexModelOption(
+                    slug=slug,
+                    display_name=item.get("display_name") or slug,
+                    default_reasoning_effort=item.get("default_reasoning_level") or "medium",
+                    supported_reasoning_efforts=efforts or ("low", "medium", "high", "xhigh"),
+                )
+            )
+        return models
 
     async def stream_task(
         self,

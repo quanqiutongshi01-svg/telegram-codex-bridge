@@ -30,7 +30,7 @@ from telegram.ext import (
     filters,
 )
 
-from .codex import CodexEvent, CodexRunner, TaskInput
+from .codex import CodexEvent, CodexModelOption, CodexRunner, TaskInput
 from .config import BridgeConfig
 from .sessions import AmbiguousThreadError, SessionCatalog, ThreadLookupError
 from .state import ChatSettings, StateStore
@@ -38,7 +38,7 @@ from .transcribe import WhisperTranscriber
 
 
 LOGGER = logging.getLogger(__name__)
-EFFORT_CHOICES = ("low", "medium", "high", "xhigh")
+FALLBACK_EFFORT_CHOICES = ("low", "medium", "high", "xhigh")
 FILE_PATH_PATTERN = re.compile(r"(/[^ \n\r\t\]\)\"']+)")
 
 
@@ -101,6 +101,7 @@ class TelegramCodexBridge:
         self.bot_username: str | None = None
         self.pending_approvals: dict[str, QueuedTask] = {}
         self.workers: dict[str, WorkspaceWorker] = {}
+        self._model_options_cache: list[CodexModelOption] | None = None
         for workspace in config.workspaces:
             self._ensure_worker(workspace.name, workspace.path)
 
@@ -209,8 +210,9 @@ class TelegramCodexBridge:
             default_effort=self.config.default_reasoning_effort,
             default_plan_mode=self.config.default_plan_mode,
         )
-        if settings.reasoning_effort == "minimal":
-            settings.reasoning_effort = "low"
+        normalized_effort = self._normalize_effort_for_model(settings.model, settings.reasoning_effort)
+        if settings.reasoning_effort != normalized_effort:
+            settings.reasoning_effort = normalized_effort
             self.state.update_chat_settings(settings)
         return settings
 
@@ -321,16 +323,19 @@ class TelegramCodexBridge:
 
     def _model_keyboard(self, current_model: str) -> InlineKeyboardMarkup:
         rows = []
-        for model in self.config.quick_models:
-            label = ("* " if model == current_model else "") + model
-            rows.append([InlineKeyboardButton(label, callback_data=f"model:{model}")])
+        for model in self._model_options():
+            label = model.display_name
+            if model.display_name != model.slug:
+                label = f"{model.display_name} ({model.slug})"
+            label = ("* " if model.slug == current_model else "") + label
+            rows.append([InlineKeyboardButton(label[:60], callback_data=f"model:{model.slug}")])
         return InlineKeyboardMarkup(rows)
 
-    def _effort_keyboard(self, current_effort: str) -> InlineKeyboardMarkup:
+    def _effort_keyboard(self, current_effort: str, current_model: str) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton(("* " if effort == current_effort else "") + effort, callback_data=f"effort:{effort}")]
-                for effort in EFFORT_CHOICES
+                for effort in self._effort_choices(current_model)
             ]
         )
 
@@ -387,6 +392,47 @@ class TelegramCodexBridge:
 
     def _binary_available(self, binary: str) -> bool:
         return shutil.which(binary) is not None or Path(binary).exists()
+
+    def _model_options(self) -> list[CodexModelOption]:
+        if self._model_options_cache is not None:
+            return self._model_options_cache
+        try:
+            options = self.codex.list_models()
+        except Exception:  # noqa: BLE001
+            LOGGER.warning("Falling back to configured quick models", exc_info=True)
+            options = [
+                CodexModelOption(
+                    slug=model,
+                    display_name=model,
+                    default_reasoning_effort="medium",
+                    supported_reasoning_efforts=FALLBACK_EFFORT_CHOICES,
+                )
+                for model in self.config.quick_models
+            ]
+        self._model_options_cache = options
+        return options
+
+    def _model_option(self, slug: str) -> CodexModelOption | None:
+        for model in self._model_options():
+            if model.slug == slug:
+                return model
+        return None
+
+    def _effort_choices(self, model_slug: str) -> tuple[str, ...]:
+        model = self._model_option(model_slug)
+        if model is None:
+            return FALLBACK_EFFORT_CHOICES
+        return model.supported_reasoning_efforts or FALLBACK_EFFORT_CHOICES
+
+    def _normalize_effort_for_model(self, model_slug: str, effort: str) -> str:
+        normalized = "low" if effort == "minimal" else effort
+        choices = self._effort_choices(model_slug)
+        if normalized in choices:
+            return normalized
+        model = self._model_option(model_slug)
+        if model and model.default_reasoning_effort in choices:
+            return model.default_reasoning_effort
+        return choices[0]
 
     def _source_label(self, source_description: str) -> str:
         labels = {
@@ -470,7 +516,7 @@ class TelegramCodexBridge:
             "/status - 查看当前工作状态\n"
             "/doctor - 快速自检桥接器运行状态\n"
             "/model [模型ID] - 查看或切换仅 Telegram 生效的模型\n"
-            "/effort [low|medium|high|xhigh] - 查看或切换仅 Telegram 生效的推理精度\n"
+            "/effort [精度] - 查看或切换当前模型支持的推理精度\n"
             "/plan [on|off] - 查看或切换仅 Telegram 生效的计划模式\n"
             "/workspaces - 查看已注册的工作区\n"
             "/workspace [名称] - 切换当前工作区\n"
@@ -598,13 +644,20 @@ class TelegramCodexBridge:
         settings = self._chat_settings(update.effective_chat.id)
         if not context.args:
             await update.effective_message.reply_text(
-                f"当前仅 Telegram 生效的模型：{settings.model}",
+                f"当前仅 Telegram 生效的模型：{settings.model}\n模型列表来自当前 Codex 本地模型目录。",
                 reply_markup=self._model_keyboard(settings.model),
             )
             return
-        settings.model = context.args[0]
+        model = self._model_option(context.args[0])
+        if model is None:
+            await update.effective_message.reply_text("这个模型不在当前 Codex 模型目录里。请用 /model 查看可选模型。")
+            return
+        settings.model = model.slug
+        settings.reasoning_effort = self._normalize_effort_for_model(model.slug, settings.reasoning_effort)
         self.state.update_chat_settings(settings)
-        await update.effective_message.reply_text(f"仅 Telegram 生效的模型已切换为：{settings.model}")
+        await update.effective_message.reply_text(
+            f"仅 Telegram 生效的模型已切换为：{settings.model}\n推理精度：{settings.reasoning_effort}"
+        )
 
     async def effort_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -613,12 +666,13 @@ class TelegramCodexBridge:
         if not context.args:
             await update.effective_message.reply_text(
                 f"当前仅 Telegram 生效的推理精度：{settings.reasoning_effort}",
-                reply_markup=self._effort_keyboard(settings.reasoning_effort),
+                reply_markup=self._effort_keyboard(settings.reasoning_effort, settings.model),
             )
             return
         effort = context.args[0].lower()
-        if effort not in EFFORT_CHOICES:
-            await update.effective_message.reply_text("推理精度只能是：low、medium、high、xhigh。")
+        choices = self._effort_choices(settings.model)
+        if effort not in choices:
+            await update.effective_message.reply_text(f"当前模型支持的推理精度是：{', '.join(choices)}。")
             return
         settings.reasoning_effort = effort
         self.state.update_chat_settings(settings)
@@ -661,7 +715,7 @@ class TelegramCodexBridge:
             workspace_path=target.path,
             chat_id=chat_id,
             model=settings.model,
-            reasoning_effort=settings.reasoning_effort,
+            reasoning_effort=self._normalize_effort_for_model(settings.model, settings.reasoning_effort),
             plan_mode=settings.plan_mode,
             thread_name=target.thread_name,
             image_paths=image_paths or [],
@@ -743,7 +797,7 @@ class TelegramCodexBridge:
             if value == "effort":
                 await query.edit_message_text(
                     f"当前仅 Telegram 生效的推理精度：{settings.reasoning_effort}",
-                    reply_markup=self._with_back_button(self._effort_keyboard(settings.reasoning_effort)),
+                    reply_markup=self._with_back_button(self._effort_keyboard(settings.reasoning_effort, settings.model)),
                 )
                 return
             if value == "plan":
@@ -817,19 +871,24 @@ class TelegramCodexBridge:
             )
             return
         if action == "model":
+            model = self._model_option(value)
+            if model is None:
+                await query.edit_message_text("这个模型不在当前 Codex 模型目录里。", reply_markup=self._menu_keyboard())
+                return
             settings.model = value
+            settings.reasoning_effort = self._normalize_effort_for_model(value, settings.reasoning_effort)
             self.state.update_chat_settings(settings)
             await query.edit_message_text(
-                f"仅 Telegram 生效的模型已切换为 {value}",
+                f"仅 Telegram 生效的模型已切换为 {value}\n推理精度：{settings.reasoning_effort}",
                 reply_markup=self._with_back_button(self._model_keyboard(value)),
             )
             return
-        if action == "effort" and value in EFFORT_CHOICES:
+        if action == "effort" and value in self._effort_choices(settings.model):
             settings.reasoning_effort = value
             self.state.update_chat_settings(settings)
             await query.edit_message_text(
                 f"仅 Telegram 生效的推理精度已切换为 {value}",
-                reply_markup=self._with_back_button(self._effort_keyboard(value)),
+                reply_markup=self._with_back_button(self._effort_keyboard(value, settings.model)),
             )
             return
         if action == "plan" and value in {"on", "off"}:

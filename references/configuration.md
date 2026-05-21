@@ -36,8 +36,8 @@ path = "/Users/your-name/projects/telegram-codex-bridge"
 - `/menu`: open the Telegram control panel.
 - `/status`: current workspace, Telegram-only model/effort/plan mode, queue state.
 - `/doctor`: quick bridge self-check.
-- `/model [id]`: show or change the Telegram-only default model for this chat.
-- `/effort [low|medium|high|xhigh]`: show or change Telegram-only reasoning effort.
+- `/model [id]`: show or change the Telegram-only default model for this chat. Button choices come from `codex debug models`.
+- `/effort [level]`: show or change Telegram-only reasoning effort. Choices follow the selected model's supported levels.
 - `/plan [on|off]`: toggle bridge-managed planning mode for Telegram tasks.
 - `/workspaces`: list registered workspaces.
 - `/workspace [name]`: show or change the chat's active workspace.

@@ -1,6 +1,7 @@
 from pathlib import Path
+import subprocess
 
-from telegram_codex_bridge.codex import TaskInput, build_command, build_prompt
+from telegram_codex_bridge.codex import CodexRunner, TaskInput, build_command, build_prompt
 
 
 def test_build_command_includes_telegram_only_overrides(tmp_path: Path) -> None:
@@ -80,3 +81,28 @@ def test_build_prompt_mentions_selected_thread_and_execution_root(tmp_path: Path
     assert "Workspace profile: main" in prompt
     assert f"Execution root: {tmp_path}" in prompt
     assert "Selected Codex thread: 新媒体矩阵运行" in prompt
+
+
+def test_list_models_parses_codex_debug_catalog(monkeypatch) -> None:
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=(
+                '{"models":['
+                '{"slug":"gpt-5.5","display_name":"GPT-5.5","visibility":"list",'
+                '"default_reasoning_level":"medium",'
+                '"supported_reasoning_levels":[{"effort":"low"},{"effort":"xhigh"}]},'
+                '{"slug":"hidden","display_name":"Hidden","visibility":"hidden"}'
+                ']}'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    models = CodexRunner("codex").list_models()
+
+    assert [model.slug for model in models] == ["gpt-5.5"]
+    assert models[0].display_name == "GPT-5.5"
+    assert models[0].supported_reasoning_efforts == ("low", "xhigh")

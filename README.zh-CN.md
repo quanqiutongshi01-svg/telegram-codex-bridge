@@ -95,8 +95,8 @@ python3 scripts/service_control.py status
 - `/thread <name|id|clear>`：切换到已有线程，或清空当前线程绑定
 - `/workspaces`：查看工作区
 - `/workspace <name>`：切换工作区
-- `/model <id>`：设置仅 Telegram 生效的模型
-- `/effort <low|medium|high|xhigh>`：设置仅 Telegram 生效的推理精度
+- `/model <id>`：从本地 Codex 模型目录中设置仅 Telegram 生效的模型
+- `/effort <level>`：设置当前模型支持的推理精度
 - `/plan <on|off>`：切换仅 Telegram 生效的计划模式
 - `/new`：新建一个 Telegram 线程
 - `/stop`：停止当前执行任务

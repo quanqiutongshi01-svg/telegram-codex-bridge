@@ -95,8 +95,8 @@ python3 scripts/service_control.py status
 - `/thread <name|id|clear>`: switch to a saved thread or clear selection
 - `/workspaces`: list workspaces
 - `/workspace <name>`: switch workspace
-- `/model <id>`: set the Telegram-only model
-- `/effort <low|medium|high|xhigh>`: set Telegram-only reasoning effort
+- `/model <id>`: set the Telegram-only model from the local Codex model catalog
+- `/effort <level>`: set a reasoning effort supported by the selected model
 - `/plan <on|off>`: toggle Telegram-only plan mode
 - `/new`: start a fresh Telegram thread
 - `/stop`: stop the current running task
