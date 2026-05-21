@@ -8,6 +8,7 @@ import mimetypes
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import time
 import uuid
 
@@ -448,6 +449,10 @@ class TelegramCodexBridge:
                     InlineKeyboardButton("对话", callback_data="menu:threads"),
                 ],
                 [
+                    InlineKeyboardButton("项目概览", callback_data="menu:overview"),
+                    InlineKeyboardButton("项目任务", callback_data="menu:project_tasks"),
+                ],
+                [
                     InlineKeyboardButton("搜索", callback_data="menu:search"),
                     InlineKeyboardButton("收藏当前", callback_data="favorite:current"),
                 ],
@@ -559,15 +564,75 @@ class TelegramCodexBridge:
         lines.append("选择项目后，“对话”按钮只会显示这个项目下的本地 Codex 对话。")
         return "\n".join(lines)
 
-    def _recent_tasks_text(self, chat_id: int) -> str:
-        rows = self.state.recent_tasks(chat_id, limit=8)
+    def _recent_tasks_text(self, chat_id: int, project_path: Path | None = None) -> str:
+        rows = self.state.recent_tasks(chat_id, limit=8, project_path=project_path)
         if not rows:
-            return "还没有记录到任务。"
-        lines = ["最近任务："]
+            return "这个范围内还没有记录到任务。"
+        lines = ["最近任务：" if project_path is None else "当前项目最近任务："]
         for row in rows:
             prompt = str(row["prompt"]).replace("\n", " ")[:50]
             danger = "，提权" if row["dangerous"] else ""
             lines.append(f"- {row['status']}｜{row['workspace_name']}{danger}｜{prompt}")
+        return "\n".join(lines)
+
+    def _project_git_summary(self, project_path: Path) -> str:
+        try:
+            root = subprocess.run(
+                ["git", "-C", str(project_path), "rev-parse", "--show-toplevel"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            ).stdout.strip()
+            branch = subprocess.run(
+                ["git", "-C", str(project_path), "branch", "--show-current"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            ).stdout.strip() or "detached"
+            status = subprocess.run(
+                ["git", "-C", str(project_path), "status", "--short"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            ).stdout.splitlines()
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return "Git：未检测到可读取的 Git 仓库。"
+        dirty_count = len(status)
+        if dirty_count == 0:
+            return f"Git：{branch}，工作区干净。\n仓库：{root}"
+        preview = "、".join(line[3:80] for line in status[:3])
+        return f"Git：{branch}，有 {dirty_count} 个改动。\n近期改动：{preview}\n仓库：{root}"
+
+    def _project_overview_text(self, settings: ChatSettings) -> str:
+        project_path = self._selected_project_path(settings)
+        project_name = settings.active_project_name or self._project_display_name(project_path)
+        threads = self.session_catalog.list_threads(limit=5, project_cwd=project_path, include_metadata=True)
+        task_rows = self.state.recent_tasks(settings.chat_id, limit=5, project_path=project_path)
+        lines = [
+            f"项目概览：{project_name}",
+            f"路径：{project_path}",
+            "",
+            self._project_git_summary(project_path),
+            "",
+            "最近对话：",
+        ]
+        if threads:
+            for thread in threads:
+                marker = "* " if thread.session_id == settings.active_session_id else "- "
+                lines.append(f"{marker}{thread.display_name} [{thread.session_id[:8]}]")
+        else:
+            lines.append("- 这个项目还没有本地 Codex 对话记录。")
+        lines.extend(["", "最近进展："])
+        if task_rows:
+            for row in task_rows:
+                prompt = str(row["prompt"]).replace("\n", " ")[:56]
+                lines.append(f"- {row['status']}｜{prompt}")
+        else:
+            lines.append("- Telegram 里还没有这个项目的任务记录。")
+        lines.extend(["", "你可以继续发任务，也可以点“对话”接上某个历史对话。"])
         return "\n".join(lines)
 
     def _logs_text(self) -> str:
@@ -888,7 +953,12 @@ class TelegramCodexBridge:
     async def tasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
             return
-        await update.effective_message.reply_text(self._recent_tasks_text(update.effective_chat.id), reply_markup=self._menu_keyboard())
+        settings = self._chat_settings(update.effective_chat.id)
+        project_path = self._selected_project_path(settings) if context.args and context.args[0] == "project" else None
+        await update.effective_message.reply_text(
+            self._recent_tasks_text(update.effective_chat.id, project_path),
+            reply_markup=self._menu_keyboard(),
+        )
 
     async def projects_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._ensure_allowed(update):
@@ -905,7 +975,7 @@ class TelegramCodexBridge:
         settings = self._chat_settings(update.effective_chat.id)
         if not context.args:
             await update.effective_message.reply_text(
-                f"当前项目：{self._current_project_summary(settings)}",
+                self._project_overview_text(settings),
                 reply_markup=self._projects_keyboard(settings),
             )
             return
@@ -926,7 +996,8 @@ class TelegramCodexBridge:
         self.state.update_chat_settings(settings)
         self._ensure_worker(settings.active_project_name or project.name, project.path)
         await update.effective_message.reply_text(
-            f"已切换到项目：{settings.active_project_name}\n路径：{project.path}\n现在可以点“对话”选择这个项目里的历史对话。"
+            self._project_overview_text(settings),
+            reply_markup=self._with_back_button(self._threads_keyboard(settings)),
         )
 
     async def workspaces_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1262,6 +1333,20 @@ class TelegramCodexBridge:
             if value == "tasks":
                 await self._edit_callback_message(query, self._recent_tasks_text(update.effective_chat.id), reply_markup=self._menu_keyboard())
                 return
+            if value == "project_tasks":
+                await self._edit_callback_message(
+                    query,
+                    self._recent_tasks_text(update.effective_chat.id, self._selected_project_path(settings)),
+                    reply_markup=self._menu_keyboard(),
+                )
+                return
+            if value == "overview":
+                await self._edit_callback_message(
+                    query,
+                    self._project_overview_text(settings),
+                    reply_markup=self._with_back_button(self._threads_keyboard(settings)),
+                )
+                return
             if value == "threads":
                 await self._edit_callback_message(
                     query,
@@ -1350,7 +1435,7 @@ class TelegramCodexBridge:
             self._ensure_worker(settings.active_project_name or self._project_display_name(path), path)
             await self._edit_callback_message(
                 query,
-                f"已切换到项目：{settings.active_project_name}\n路径：{path}\n现在可以选择这个项目下的对话。",
+                self._project_overview_text(settings),
                 reply_markup=self._with_back_button(self._threads_keyboard(settings)),
             )
             return
@@ -1565,6 +1650,7 @@ class TelegramCodexBridge:
                 prompt=task.task.prompt,
                 status="failed",
                 dangerous=task.task.dangerous,
+                project_path=task.task.workspace_path,
             )
             await self._update_task_status_message(task, worker, "已失败", detail="你拒绝了提权请求，任务已取消。")
             return
@@ -1791,6 +1877,7 @@ class TelegramCodexBridge:
             prompt=queued_task.task.prompt,
             status="queued",
             dangerous=queued_task.task.dangerous,
+            project_path=queued_task.task.workspace_path,
         )
         await self._update_task_status_message(queued_task, worker, "排队中")
 
@@ -1807,6 +1894,7 @@ class TelegramCodexBridge:
                         prompt=job.task.prompt,
                         status="cancelled",
                         dangerous=job.task.dangerous,
+                        project_path=job.task.workspace_path,
                     )
                     await self._update_task_status_message(job, worker, "已取消")
                     continue
@@ -1821,6 +1909,7 @@ class TelegramCodexBridge:
                     prompt=job.task.prompt,
                     status="failed",
                     dangerous=job.task.dangerous,
+                    project_path=job.task.workspace_path,
                 )
                 await self._update_task_status_message(job, worker, "已失败", detail="桥接器在执行任务时遇到了意外错误。")
             finally:
@@ -1900,6 +1989,7 @@ class TelegramCodexBridge:
                 prompt=job.task.prompt,
                 status="cancelled",
                 dangerous=job.task.dangerous,
+                project_path=job.task.workspace_path,
             )
             await self._update_task_status_message(job, worker, "已取消")
             return
@@ -1910,6 +2000,7 @@ class TelegramCodexBridge:
                 prompt=job.task.prompt,
                 status="approval_requested",
                 dangerous=job.task.dangerous,
+                project_path=job.task.workspace_path,
             )
             return
         if returncode == 0:
@@ -1919,6 +2010,7 @@ class TelegramCodexBridge:
                 prompt=job.task.prompt,
                 status="completed",
                 dangerous=job.task.dangerous,
+                project_path=job.task.workspace_path,
             )
             await self._update_task_status_message(job, worker, "已完成")
             await self._send_detected_files(chat_id, "\n".join(final_messages), job.reply_to_message_id)
@@ -1929,6 +2021,7 @@ class TelegramCodexBridge:
             prompt=job.task.prompt,
             status="failed",
             dangerous=job.task.dangerous,
+            project_path=job.task.workspace_path,
         )
         await self._update_task_status_message(job, worker, "已失败", detail=f"Codex 退出状态码：{returncode}")
 

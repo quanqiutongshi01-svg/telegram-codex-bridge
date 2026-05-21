@@ -38,12 +38,14 @@ path = "/Users/your-name/projects/telegram-codex-bridge"
 - `/doctor`: quick bridge self-check.
 - `/logs`: show recent service stdout/stderr snippets.
 - `/tasks`: show recent task history for the current chat.
+- `/tasks project`: show recent task history filtered to the current project path.
 - `/model [id]`: show or change the Telegram-only default model for this chat. Button choices come from `codex debug models`.
 - `/effort [level]`: show or change Telegram-only reasoning effort. Choices follow the selected model's supported levels.
 - `/plan [on|off]`: toggle bridge-managed planning mode for Telegram tasks.
 - `/voiceconfirm [on|off]`: require user confirmation before sending voice transcripts to Codex.
 - `/projects`: list local Codex projects discovered from desktop session metadata, plus configured workspaces.
 - `/project [name|path|clear]`: show, change, or clear the current project selection.
+- Project switches return a project overview card with recent conversations, project-scoped Telegram task progress, and a lightweight Git status summary.
 - `/threads`: list recent local Codex conversations for the current project.
 - `/thread [name|id|clear]`: attach Telegram to a desktop-created Codex conversation or clear the current conversation binding.
 - `/search [query]`: search project names, paths, and conversation titles.

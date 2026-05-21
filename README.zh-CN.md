@@ -20,6 +20,7 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - 带按钮的 Telegram 控制面板
 - 像 Codex App 一样按“项目 -> 对话”切换新的 Telegram 对话和已有桌面端对话
 - 项目/对话搜索、收藏和最近使用排序
+- 切换项目后自动显示项目概览，包含最近对话、Telegram 最近任务进展和 Git 状态
 - 任务卡片支持详情、取消、重新运行、风险提示和最近任务记录
 - 可选的语音转写确认模式，确认后再交给 Codex
 - 可直接在 Telegram 查看最近错误日志
@@ -101,6 +102,7 @@ python3 scripts/service_control.py status
 - `/project <名称|路径|clear>`：切换项目，或清空项目选择
 - `/threads`：查看当前项目下的 Codex 对话
 - `/thread <name|id|clear>`：切换到已有对话，或清空当前对话绑定
+- `/tasks project`：只查看当前项目的最近任务进展
 - `/search <关键词>`：搜索项目、路径和对话标题
 - `/favorite`：收藏或取消收藏当前项目/对话
 - `/workspaces`：项目选择的兼容命令

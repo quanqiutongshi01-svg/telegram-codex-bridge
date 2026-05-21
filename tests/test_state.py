@@ -106,3 +106,31 @@ def test_pending_voice_round_trip(tmp_path) -> None:
     assert pending["local_path"] == str(local_path)
     state.clear_pending_voice(7)
     assert state.get_pending_voice(7) is None
+
+
+def test_recent_tasks_can_filter_by_project_path(tmp_path) -> None:
+    state = StateStore(tmp_path / "state.db")
+    state.initialize()
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+
+    state.add_task(
+        chat_id=7,
+        workspace_name="project-a",
+        prompt="整理项目 A",
+        status="completed",
+        dangerous=False,
+        project_path=project_a,
+    )
+    state.add_task(
+        chat_id=7,
+        workspace_name="project-b",
+        prompt="整理项目 B",
+        status="completed",
+        dangerous=False,
+        project_path=project_b,
+    )
+
+    rows = state.recent_tasks(7, project_path=project_a)
+
+    assert [row["prompt"] for row in rows] == ["整理项目 A"]

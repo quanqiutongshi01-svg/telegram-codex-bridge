@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS task_history (
   prompt TEXT NOT NULL,
   status TEXT NOT NULL,
   dangerous INTEGER NOT NULL DEFAULT 0,
+  project_path TEXT,
   created_at REAL NOT NULL
 );
 
@@ -116,6 +117,12 @@ class StateStore:
         for column_name, column_type in required_columns.items():
             if column_name not in existing_columns:
                 connection.execute(f"ALTER TABLE chat_settings ADD COLUMN {column_name} {column_type}")
+        task_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(task_history)")
+        }
+        if "project_path" not in task_columns:
+            connection.execute("ALTER TABLE task_history ADD COLUMN project_path TEXT")
         connection.execute(
             """
             UPDATE chat_settings
@@ -309,14 +316,23 @@ class StateStore:
         prompt: str,
         status: str,
         dangerous: bool,
+        project_path: str | Path | None = None,
     ) -> None:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO task_history (chat_id, workspace_name, prompt, status, dangerous, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO task_history (chat_id, workspace_name, prompt, status, dangerous, project_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (chat_id, workspace_name, prompt, status, int(dangerous), time.time()),
+                (
+                    chat_id,
+                    workspace_name,
+                    prompt,
+                    status,
+                    int(dangerous),
+                    str(Path(project_path).expanduser().resolve()) if project_path else None,
+                    time.time(),
+                ),
             )
 
     def record_project_usage(self, chat_id: int, project_path: str | Path, project_name: str) -> None:
@@ -436,11 +452,22 @@ class StateStore:
         with self._lock, self._connect() as connection:
             connection.execute("DELETE FROM pending_voice WHERE chat_id = ?", (chat_id,))
 
-    def recent_tasks(self, chat_id: int, *, limit: int = 10) -> list[sqlite3.Row]:
+    def recent_tasks(self, chat_id: int, *, limit: int = 10, project_path: str | Path | None = None) -> list[sqlite3.Row]:
         with self._lock, self._connect() as connection:
+            if project_path is not None:
+                return connection.execute(
+                    """
+                    SELECT workspace_name, prompt, status, dangerous, project_path, created_at
+                    FROM task_history
+                    WHERE chat_id = ? AND project_path = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (chat_id, str(Path(project_path).expanduser().resolve()), limit),
+                ).fetchall()
             return connection.execute(
                 """
-                SELECT workspace_name, prompt, status, dangerous, created_at
+                SELECT workspace_name, prompt, status, dangerous, project_path, created_at
                 FROM task_history
                 WHERE chat_id = ?
                 ORDER BY created_at DESC

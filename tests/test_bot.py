@@ -220,3 +220,43 @@ def test_voice_confirm_keyboard_marks_current_choice(tmp_path) -> None:
     keyboard = bridge._voice_confirm_keyboard(True)
 
     assert keyboard.inline_keyboard[0][0].text == "* 开启"
+
+
+def test_project_overview_includes_threads_and_project_tasks(tmp_path) -> None:
+    bridge = make_bridge(tmp_path)
+    project_path = (tmp_path / "project").resolve()
+    project_path.mkdir()
+    settings = ChatSettings(
+        chat_id=7,
+        workspace_name="main",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        plan_mode=False,
+        active_project_name="project",
+        active_project_cwd=project_path,
+    )
+    bridge.session_catalog.list_threads = lambda **kwargs: [
+        type(
+            "Thread",
+            (),
+            {
+                "session_id": "session-1",
+                "display_name": "项目对话",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        )()
+    ]
+    bridge.state.add_task(
+        chat_id=7,
+        workspace_name="project",
+        prompt="继续完善项目",
+        status="completed",
+        dangerous=False,
+        project_path=project_path,
+    )
+
+    text = bridge._project_overview_text(settings)
+
+    assert "项目概览：project" in text
+    assert "项目对话" in text
+    assert "继续完善项目" in text

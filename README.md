@@ -20,6 +20,7 @@ An installable macOS bridge that keeps a local Codex session reachable through T
 - Telegram control panel with buttons
 - Project-aware switching between new Telegram conversations and existing Codex Desktop conversations
 - Project/conversation search, favorites, and recent-project ordering
+- Project overview cards after switching, with recent conversations, recent Telegram task progress, and Git status
 - Task cards with details, cancel, rerun, risk labels, and recent task history
 - Optional voice transcription confirmation before sending to Codex
 - Telegram-accessible recent error logs
@@ -101,6 +102,7 @@ python3 scripts/service_control.py status
 - `/project <name|path|clear>`: switch project or clear project selection
 - `/threads`: list conversations under the current project
 - `/thread <name|id|clear>`: switch to a saved conversation or clear selection
+- `/tasks project`: show recent task progress for the current project only
 - `/search <query>`: search projects, paths, and conversation titles
 - `/favorite`: favorite or unfavorite the current project/conversation
 - `/workspaces`: compatibility alias for project selection
